@@ -1,10 +1,15 @@
 import psycopg2
 from psycopg2.extras import DictCursor
 import streamlit as st
+import hashlib  # Biblioteca nativa para segurança de senhas
 
 def obter_conexao():
     # Puxa a URL de conexão direto e seguro dos Secrets do Streamlit
     return psycopg2.connect(st.secrets["postgres"]["url"])
+
+def gerar_hash_senha(senha):
+    # Transforma a senha em um código seguro de 64 caracteres (SHA-256)
+    return hashlib.sha256(senha.encode()).hexdigest()
 
 def criar_tabela():
     conn = obter_conexao()
@@ -29,7 +34,7 @@ def criar_tabela():
     );
     """)
     
-    # 3. Tabela de Entregas
+    # 3. Tabela de Entregas 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS entregas (
         id SERIAL PRIMARY KEY,
@@ -45,9 +50,11 @@ def criar_tabela():
     # Cria um usuário administrador padrão caso o banco esteja totalmente vazio
     cursor.execute("SELECT COUNT(*) FROM usuarios;")
     if cursor.fetchone()[0] == 0:
+        # O admin padrão agora nasce com a senha criptografada por segurança
+        senha_segura = gerar_hash_senha("admin123")
         cursor.execute(
             "INSERT INTO usuarios (username, nome, senha, perfil) VALUES (%s, %s, %s, %s);",
-            ("admin", "Administrador", "admin123", "admin")
+            ("admin", "Administrador", senha_segura, "admin")
         )
         
     conn.commit()
@@ -57,7 +64,9 @@ def criar_tabela():
 def autenticar_usuario(username, senha):
     conn = obter_conexao()
     cursor = conn.cursor(cursor_factory=DictCursor)
-    cursor.execute("SELECT * FROM usuarios WHERE username = %s AND senha = %s;", (username, senha))
+    # Criptografa a senha digitada para comparar com o código salvo no banco
+    senha_criptografada = gerar_hash_senha(senha)
+    cursor.execute("SELECT * FROM usuarios WHERE username = %s AND senha = %s;", (username, senha_criptografada))
     usuario = cursor.fetchone()
     cursor.close()
     conn.close()
@@ -73,7 +82,11 @@ def cadastrar_entregas(bairro, valor, status_pagamento, estabelecimento, data, u
     conn.commit()
     cursor.close()
     conn.close()
+    # Limpa o cache para que a nova entrega apareça imediatamente na tela
+    st.cache_data.clear()
 
+# Cache de 60 segundos para evitar viagens internacionais desnecessárias a cada clique
+@st.cache_data(ttl=60)
 def listar_entregas(username=None):
     conn = obter_conexao()
     cursor = conn.cursor()
@@ -93,7 +106,26 @@ def atualizar_status(id_, status):
     conn.commit()
     cursor.close()
     conn.close()
+    # Limpa o cache para atualizar o status alterado instantaneamente na tela
+    st.cache_data.clear()
 
+# ── NOVA FUNÇÃO DE EXCLUSÃO INTEGRADA AO POSTGRES ─────────────────────────────
+def deletar_entrega_por_id(id_entrega, username):
+    conn = obter_conexao()
+    cursor = conn.cursor()
+    
+    # Deleta usando segurança por ID e por Usuário dono do registro no Postgres
+    cursor.execute("DELETE FROM entregas WHERE id = %s AND usuario = %s;", (id_entrega, username))
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+    
+    # Zera o cache na hora para sumir do gráfico instantaneamente!
+    st.cache_data.clear()
+
+# Cache para listar estabelecimentos de forma ultra rápida
+@st.cache_data(ttl=60)
 def listar_estabelecimentos():
     conn = obter_conexao()
     cursor = conn.cursor()
@@ -110,6 +142,8 @@ def cadastrar_estabelecimento(nome):
     conn.commit()
     cursor.close()
     conn.close()
+    # Limpa o cache para atualizar a lista de estabelecimentos
+    st.cache_data.clear()
 
 def deletar_estabelecimento(id_):
     conn = obter_conexao()
@@ -118,7 +152,11 @@ def deletar_estabelecimento(id_):
     conn.commit()
     cursor.close()
     conn.close()
+    # Limpa o cache para remover o estabelecimento sumir da lista na hora
+    st.cache_data.clear()
 
+# Cache para carregar a lista de usuários instantaneamente
+@st.cache_data(ttl=60)
 def listar_usuarios():
     conn = obter_conexao()
     cursor = conn.cursor(cursor_factory=DictCursor)
@@ -131,10 +169,14 @@ def listar_usuarios():
 def cadastrar_usuario(username, nome, senha, perfil):
     conn = obter_conexao()
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO usuarios (username, nome, senha, perfil) VALUES (%s, %s, %s, %s);", (username, nome, senha, perfil))
+    # Protege a senha de novos usuários criados no sistema
+    senha_criptografada = gerar_hash_senha(senha)
+    cursor.execute("INSERT INTO usuarios (username, nome, senha, perfil) VALUES (%s, %s, %s, %s);", (username, nome, senha_criptografada, perfil))
     conn.commit()
     cursor.close()
     conn.close()
+    # Limpa o cache para que o novo usuário apareça na lista administrativa
+    st.cache_data.clear()
 
 def deletar_usuario(id_):
     conn = obter_conexao()
@@ -143,18 +185,5 @@ def deletar_usuario(id_):
     conn.commit()
     cursor.close()
     conn.close()
-
-def deletar_entrega_por_id(id_entrega, username):
-    import sqlite3
-    conn = sqlite3.connect('velox.db')
-    cursor = conn.cursor()
-    
-    try:
-        # Tenta deletar usando a coluna padrão 'id'
-        cursor.execute("DELETE FROM entregas WHERE id = ? AND usuario = ?", (id_entrega, username))
-    except sqlite3.OperationalError:
-        # Se der erro de coluna, tenta usando 'id_entrega' (comum em algumas versões do seu db)
-        cursor.execute("DELETE FROM entregas WHERE id_entrega = ? AND usuario = ?", (id_entrega, username))
-        
-    conn.commit()
-    conn.close()
+    # Limpa o cache após deletar um usuário
+    st.cache_data.clear()
