@@ -148,24 +148,18 @@ section[data-testid="stSidebar"] {{
     color: {C_MUTED} !important;
     border-radius: 6px !important;
 }}
+.btn-danger-custom > button {{
+    background: #rgba(248,81,73,0.15) !important;
+    border: 1px solid #f85149 !important;
+    color: #f85149 !important;
+    border-radius: 6px !important;
+}}
 .btn-success > button {{
     background: {C_GREEN_DIM} !important;
     border: 1px solid {C_GREEN} !important;
     color: {C_GREEN} !important;
     border-radius: 6px !important;
 }}
-
-.perfil-badge {{
-    display: inline-block;
-    font-size: 0.55rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    padding: 1px 5px;
-    border-radius: 3px;
-    margin-left: 4px;
-}}
-.badge-admin {{ background: rgba(47,129,247,0.15); color: {C_ACCENT}; border: 1px solid {C_ACCENT}; }}
-.badge-entregador {{ background: rgba(63,185,80,0.12); color: {C_GREEN}; border: 1px solid {C_GREEN}; }}
 
 div[data-testid="stTabs"] button {{
     color: {C_MUTED} !important;
@@ -281,7 +275,7 @@ with abas[0]:
             database.cadastrar_entregas(bairro, valor, status_pagamento, estabelecimento, str(date.today()), username_atual())
             st.success("Entrega registrada com sucesso.")
 
-# ── ABA 1: VER ENTREGAS ───────────────────────────────────────────────────────
+# ── ABA 1: VER ENTREGAS (COM CORREÇÃO DE ERROS) ──────────────────────────────
 with abas[1]:
     st.markdown('<div class="sec-eyebrow">Histórico</div><div class="sec-title">Entregas</div>', unsafe_allow_html=True)
     filtro_user = None if is_admin() else username_atual()
@@ -310,6 +304,25 @@ with abas[1]:
         df_display = df_view.copy()
         df_display["Valor(R$)"] = df_display["Valor(R$)"].apply(fmt_brl)
         st.dataframe(df_display.style.apply(lambda col: ["color: #3fb950" if v == "Pago" else f"color: {C_AMBER}" if v == "Pendente" else "" for v in col], subset=["Status"]), use_container_width=True, hide_index=True)
+
+        # Seção para corrigir erros removendo registros específicos
+        st.markdown("<br><hr style='border-color:"+C_BORDER+";'>", unsafe_allow_html=True)
+        st.markdown('<div class="sec-eyebrow">Ajustes</div><div class="sec-title" style="font-size:0.95rem; border:none; margin-bottom:0.5rem;">Registrou algo errado? Apague aqui:</div>', unsafe_allow_html=True)
+        
+        # Filtra apenas as entregas do próprio usuário conectado para exibição de deleção
+        minhas_entregas = df[df["Usuario"] == username_atual()]
+        if minhas_entregas.empty:
+            st.caption("Nenhum registro próprio disponível para correção.")
+        else:
+            for _, row in minhas_entregas.iterrows():
+                col_info, col_btn = st.columns([5, 1])
+                col_info.markdown(f"<div style='font-size:0.8rem; padding:4px 0;'>📦 <b>{row['Estabelecimento']}</b> — {row['Bairro']} ({fmt_brl(row['Valor(R$)'])}) — <span style='color:{C_MUTED};'>{row['Data']}</span></div>", unsafe_allow_html=True)
+                with col_btn:
+                    st.markdown('<div class="btn-danger-custom">', unsafe_allow_html=True)
+                    if st.button("✕ Excluir", key=f"del_entrega_{int(row['ID'])}", use_container_width=True):
+                        database.deletar_entrega_por_id(int(row["ID"]), username_atual())
+                        st.rerun()
+                    st.markdown('</div>', unsafe_allow_html=True)
 
 # ── ABA 2: PENDENTES ──────────────────────────────────────────────────────────
 with abas[2]:
@@ -360,7 +373,7 @@ with abas[3]:
                 st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
-# ── ABA 4: PAINEL/RELATÓRIOS (CORRIGIDA) ──────────────────────────────────────
+# ── ABA 4: PAINEL/RELATÓRIOS ──────────────────────────────────────────────────
 with abas[4]:
     st.markdown('<div class="sec-eyebrow">Desempenho</div><div class="sec-title">Gráficos e Indicadores Separados</div>', unsafe_allow_html=True)
     filtro_user = None if is_admin() else username_atual()
@@ -372,7 +385,6 @@ with abas[4]:
         df = pd.DataFrame(entregas, columns=["ID", "Bairro", "Valor(R$)", "Status", "Estabelecimento", "Data", "Usuario"])
         df["Valor(R$)"] = pd.to_numeric(df["Valor(R$)"], errors="coerce")
         
-        # Conversão robusta de datas eliminando fusos horários locais
         df["Data_p"] = pd.to_datetime(df["Data"], errors="coerce").dt.date
         df = df.dropna(subset=["Data_p"])
 
@@ -384,7 +396,6 @@ with abas[4]:
         df_semana = df[df["Data_p"] >= inicio_semana]
         df_mes = df[df["Data_p"] >= inicio_mes]
 
-        # Renderização dos cartões dinâmicos solicitados
         c_dia, c_sem, c_mes = st.columns(3)
         c_dia.markdown(kpi("Rendimento de Hoje", fmt_brl(df_hoje["Valor(R$)"].sum()), f"{len(df_hoje)} entregas", "kpi-value-green"), unsafe_allow_html=True)
         c_sem.markdown(kpi("Rendimento da Semana", fmt_brl(df_semana["Valor(R$)"].sum()), f"{len(df_semana)} entregas", "kpi-value-accent"), unsafe_allow_html=True)
@@ -432,7 +443,7 @@ with abas[4]:
         st.markdown("<br><hr style='border-color:"+C_BORDER+";'><br>", unsafe_allow_html=True)
 
         with st.expander("📈 Histórico Total: Faturamento por Bairro", expanded=False):
-            df_bairro = df.groupby("Bairro")["Valor(R$)"].sum().reset_index().sort_values(by="Bairro", ascending=False)
+            df_bairro = df.groupby("Bairro")["Valor(R$)"].sum().reset_index().sort_values(by="Valor(R$)", ascending=False)
             fig_bairro = px.bar(df_bairro, x="Bairro", y="Valor(R$)", template="plotly_dark", text_auto='.2f')
             layout_b = LAYOUT.copy()
             layout_b.update(dict(xaxis=dict(tickangle=-45, gridcolor=C_BORDER, fixedrange=True)))
