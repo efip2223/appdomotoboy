@@ -231,7 +231,25 @@ with st.sidebar:
     badge_text = "Admin" if is_admin() else "Entregador"
     st.markdown(f"<div style='background:{C_SURFACE2};border:1px solid {C_BORDER};border-radius:6px;padding:10px 12px;margin-top:10px'><b>{st.session_state['usuario']}</b><span class='perfil-badge {badge_cls}'>{badge_text}</span><br><span style='color:{C_MUTED};font-size:0.7rem'>@{username_atual()}</span></div>", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
+    
+    # BOTÃO DE LIMPEZA FORÇADA PARA RESETAR O BANCO DE DADOS SE HOUVER SOMA FANTASMA
+    st.markdown('<div class="btn-danger-custom">', unsafe_allow_html=True)
+    if st.button("⚠️ Apagar Todas Minhas Entregas", use_container_width=True):
+        try:
+            conn = database.obter_conexao()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM entregas WHERE LOWER(TRIM(usuario)) = %s;", (username_atual().strip().lower(),))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            st.cache_data.clear()
+            st.success("Histórico totalmente resetado!")
+            st.rerun()
+        except Exception as e:
+            st.error("Erro ao resetar dados.")
+    st.markdown("</div>", unsafe_allow_html=True)
+    
+    st.markdown('<div class="btn-ghost" style="margin-top:10px;">', unsafe_allow_html=True)
     if st.button("Sair da Conta", use_container_width=True):
         for k in ["usuario", "username", "perfil"]:
             st.session_state.pop(k, None)
@@ -286,9 +304,6 @@ with abas[1]:
     else:
         df = pd.DataFrame(entregas, columns=["ID", "Bairro", "Valor(R$)", "Status", "Estabelecimento", "Data", "Usuario"])
         df["Valor(R$)"] = pd.to_numeric(df["Valor(R$)"], errors="coerce")
-        
-        # INTERCEPTAÇÃO DE SEGURANÇA: ignora o valor fantasma de 39 reais
-        df = df[df["Valor(R$)"] != 39.00]
 
         c1, c2 = st.columns(2)
         c1.markdown(kpi("Total Entregas", str(len(df)), f"{df['Status'].value_counts().get('Pago', 0)} pagas"), unsafe_allow_html=True)
@@ -310,19 +325,16 @@ with abas[1]:
         st.markdown("<br><hr style='border-color:"+C_BORDER+";'>", unsafe_allow_html=True)
         st.markdown('<div class="sec-eyebrow">Ajustes</div><div class="sec-title" style="font-size:0.95rem; border:none; margin-bottom:0.5rem;">Apagar Registro:</div>', unsafe_allow_html=True)
         
-        if df.empty:
-            st.caption("Nenhum registro próprio disponível para correção.")
-        else:
-            for _, row in df.iterrows():
-                col_info, col_btn = st.columns([5, 1])
-                col_info.markdown(f"<div style='font-size:0.8rem; padding:4px 0;'>📦 <b>{row['Estabelecimento']}</b> — {row['Bairro']} ({fmt_brl(row['Valor(R$)'])}) — <span style='color:{C_MUTED};'>{row['Data']}</span></div>", unsafe_allow_html=True)
-                with col_btn:
-                    st.markdown('<div class="btn-danger-custom">', unsafe_allow_html=True)
-                    if st.button("✕ Excluir", key=f"del_entrega_{int(row['ID'])}", use_container_width=True):
-                        database.deletar_entrega_por_id(int(row["ID"]), username_atual())
-                        st.cache_data.clear()
-                        st.rerun()
-                    st.markdown('</div>', unsafe_allow_html=True)
+        for _, row in df.iterrows():
+            col_info, col_btn = st.columns([5, 1])
+            col_info.markdown(f"<div style='font-size:0.8rem; padding:4px 0;'>📦 <b>{row['Estabelecimento']}</b> — {row['Bairro']} ({fmt_brl(row['Valor(R$)'])}) — <span style='color:{C_MUTED};'>{row['Data']}</span></div>", unsafe_allow_html=True)
+            with col_btn:
+                st.markdown('<div class="btn-danger-custom">', unsafe_allow_html=True)
+                if st.button("✕ Excluir", key=f"del_entrega_{int(row['ID'])}", use_container_width=True):
+                    database.deletar_entrega_por_id(int(row["ID"]), username_atual())
+                    st.cache_data.clear()
+                    st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
 
 # ── ABA 2: PENDENTES ──────────────────────────────────────────────────────────
 with abas[2]:
@@ -336,10 +348,6 @@ with abas[2]:
     else:
         df = pd.DataFrame(entregas, columns=["ID", "Bairro", "Valor(R$)", "Status", "Estabelecimento", "Data", "Usuario"])
         df["Valor(R$)"] = pd.to_numeric(df["Valor(R$)"], errors="coerce")
-        
-        # INTERCEPTAÇÃO DE SEGURANÇA: ignora o valor fantasma de 39 reais
-        df = df[df["Valor(R$)"] != 39.00]
-        
         df_pend = df[df["Status"] == "Pendente"].copy()
 
         if df_pend.empty:
@@ -393,9 +401,6 @@ with abas[4]:
     else:
         df = pd.DataFrame(entregas, columns=["ID", "Bairro", "Valor(R$)", "Status", "Estabelecimento", "Data", "Usuario"])
         df["Valor(R$)"] = pd.to_numeric(df["Valor(R$)"], errors="coerce")
-        
-        # INTERCEPTAÇÃO DE SEGURANÇA: ignora o valor fantasma de 39 reais
-        df = df[df["Valor(R$)"] != 39.00]
         
         df["Data_p"] = pd.to_datetime(df["Data"], errors="coerce").dt.date
         df = df.dropna(subset=["Data_p"])
