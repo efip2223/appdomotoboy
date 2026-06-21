@@ -1,5 +1,5 @@
 import streamlit as st
-from datetime import date
+from datetime import date, datetime, timedelta
 import db_manager as database
 import pandas as pd
 import plotly.express as px
@@ -37,7 +37,6 @@ st.markdown(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
 
-/* Bloqueia o balanço horizontal (tela flutuando) */
 html, body {{
     overflow-x: hidden !important;
     max-width: 100vw !important;
@@ -125,6 +124,7 @@ section[data-testid="stSidebar"] {{
 }}
 .kpi-value-green {{ color: {C_GREEN}; font-family: 'JetBrains Mono', monospace; font-size: 1.4rem; font-weight: 600; }}
 .kpi-value-amber {{ color: {C_AMBER}; font-family: 'JetBrains Mono', monospace; font-size: 1.4rem; font-weight: 600; }}
+.kpi-value-accent {{ color: {C_ACCENT}; font-family: 'JetBrains Mono', monospace; font-size: 1.4rem; font-weight: 600; }}
 .kpi-sub {{ font-size: 0.68rem; color: {C_MUTED}; margin-top: 3px; }}
 
 .stTextInput input, .stNumberInput input, .stSelectbox > div > div {{
@@ -167,7 +167,6 @@ section[data-testid="stSidebar"] {{
 .badge-admin {{ background: rgba(47,129,247,0.15); color: {C_ACCENT}; border: 1px solid {C_ACCENT}; }}
 .badge-entregador {{ background: rgba(63,185,80,0.12); color: {C_GREEN}; border: 1px solid {C_GREEN}; }}
 
-/* Estilizando as Abas Oficiais do Streamlit para o nosso tema */
 div[data-testid="stTabs"] button {{
     color: {C_MUTED} !important;
     font-weight: 600 !important;
@@ -179,8 +178,6 @@ div[data-testid="stTabs"] button[aria-selected="true"] {{
 </style>
 """, unsafe_allow_html=True)
 
-# ── Helpers e Configs de Gráfico ──────────────────────────────────────────────
-# fixedrange=True impede o zoom no celular, dragmode=False desativa o "arrastar"
 LAYOUT = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
@@ -250,12 +247,10 @@ with st.sidebar:
         st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
-
 # ════════════════════════════════════════════════════════════════════════════════
-# TABS NATIVAS DO STREAMLIT
+# TABS NATIVAS
 # ════════════════════════════════════════════════════════════════════════════════
-
-if is_admin():
+if "perfil" in st.session_state and is_admin():
     titulos_abas = ["➕ Novo", "📋 Lista", "⏳ Pagar", "🏢 Lojas", "📈 Painel", "👥 Staff"]
 else:
     titulos_abas = ["➕ Novo", "📋 Lista", "⏳ Pagar", "🏢 Lojas", "📈 Painel"]
@@ -365,46 +360,88 @@ with abas[3]:
                 st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
-# ── ABA 4: PAINEL/RELATÓRIOS ──────────────────────────────────────────────────
+# ── ABA 4: PAINEL/RELATÓRIOS (CORRIGIDA) ──────────────────────────────────────
 with abas[4]:
-    st.markdown('<div class="sec-eyebrow">Desempenho</div><div class="sec-title">Gráficos e Indicadores</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-eyebrow">Desempenho</div><div class="sec-title">Gráficos e Indicadores Separados</div>', unsafe_allow_html=True)
     filtro_user = None if is_admin() else username_atual()
     entregas = database.listar_entregas(username=filtro_user)
 
     if not entregas:
-        st.info("Sem dados suficientes.")
+        st.info("Sem dados suficientes para gerar os painéis.")
     else:
         df = pd.DataFrame(entregas, columns=["ID", "Bairro", "Valor(R$)", "Status", "Estabelecimento", "Data", "Usuario"])
         df["Valor(R$)"] = pd.to_numeric(df["Valor(R$)"], errors="coerce")
         
-        with st.expander("📈 Faturamento por Bairro", expanded=False):
-            df_bairro = df.groupby("Bairro")["Valor(R$)"].sum().reset_index().sort_values(by="Valor(R$)", ascending=False)
-            fig_bairro = px.bar(df_bairro, x="Bairro", y="Valor(R$)", template="plotly_dark", text_auto='.2f')
+        # Conversão robusta de datas eliminando fusos horários locais
+        df["Data_p"] = pd.to_datetime(df["Data"], errors="coerce").dt.date
+        df = df.dropna(subset=["Data_p"])
+
+        hoje = date.today()
+        inicio_semana = hoje - timedelta(days=hoje.weekday())
+        inicio_mes = hoje.replace(day=1)
+
+        df_hoje = df[df["Data_p"] == hoje]
+        df_semana = df[df["Data_p"] >= inicio_semana]
+        df_mes = df[df["Data_p"] >= inicio_mes]
+
+        # Renderização dos cartões dinâmicos solicitados
+        c_dia, c_sem, c_mes = st.columns(3)
+        c_dia.markdown(kpi("Rendimento de Hoje", fmt_brl(df_hoje["Valor(R$)"].sum()), f"{len(df_hoje)} entregas", "kpi-value-green"), unsafe_allow_html=True)
+        c_sem.markdown(kpi("Rendimento da Semana", fmt_brl(df_semana["Valor(R$)"].sum()), f"{len(df_semana)} entregas", "kpi-value-accent"), unsafe_allow_html=True)
+        c_mes.markdown(kpi("Rendimento do Mês", fmt_brl(df_mes["Valor(R$)"].sum()), f"{len(df_mes)} entregas", "kpi-value-amber"), unsafe_allow_html=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        periodo_selecionado = st.selectbox(
+            "Selecione o período do gráfico detalhado:",
+            ["Hoje", "Esta Semana", "Este Mês"],
+            key="filtro_periodo_painel"
+        )
+
+        if periodo_selecionado == "Hoje":
+            df_filtrado = df_hoje
+            titulo_grafico = "Faturamento por Estabelecimento (Hoje)"
+        elif periodo_selecionado == "Esta Semana":
+            df_filtrado = df_semana
+            titulo_grafico = "Faturamento por Estabelecimento (Esta Semana)"
+        else:
+            df_filtrado = df_mes
+            titulo_grafico = "Faturamento por Estabelecimento (Este Mês)"
+
+        if not df_filtrado.empty:
+            df_agrupado = df_filtrado.groupby("Estabelecimento")["Valor(R$)"].sum().reset_index().sort_values(by="Valor(R$)", ascending=False)
             
-            # Aplicando layout corrigido
+            fig_periodo = px.bar(
+                df_agrupado, 
+                x="Estabelecimento", 
+                y="Valor(R$)", 
+                template="plotly_dark", 
+                text_auto='.2f',
+                title=titulo_grafico
+            )
+            
+            layout_p = LAYOUT.copy()
+            layout_p.update(dict(xaxis=dict(tickangle=-45, gridcolor=C_BORDER, fixedrange=True)))
+            fig_periodo.update_layout(layout_p)
+            fig_periodo.update_traces(marker_color=C_ACCENT, textposition="outside")
+            
+            st.plotly_chart(fig_periodo, use_container_width=True, config={'displayModeBar': False})
+        else:
+            st.warning("Nenhuma entrega registrada para o período selecionado.")
+
+        st.markdown("<br><hr style='border-color:"+C_BORDER+";'><br>", unsafe_allow_html=True)
+
+        with st.expander("📈 Histórico Total: Faturamento por Bairro", expanded=False):
+            df_bairro = df.groupby("Bairro")["Valor(R$)"].sum().reset_index().sort_values(by="Bairro", ascending=False)
+            fig_bairro = px.bar(df_bairro, x="Bairro", y="Valor(R$)", template="plotly_dark", text_auto='.2f')
             layout_b = LAYOUT.copy()
             layout_b.update(dict(xaxis=dict(tickangle=-45, gridcolor=C_BORDER, fixedrange=True)))
             fig_bairro.update_layout(layout_b)
             fig_bairro.update_traces(marker_color=C_ACCENT, textposition="outside")
-            
-            # Adicionado config para desativar comportamento de touch
             st.plotly_chart(fig_bairro, use_container_width=True, config={'displayModeBar': False})
 
-        with st.expander("🍕 Entregas por Estabelecimento", expanded=False):
-            df_estab = df.groupby("Estabelecimento").size().reset_index(name="Quantidade")
-            fig_estab = px.pie(df_estab, values="Quantidade", names="Estabelecimento", hole=0.5, template="plotly_dark")
-            
-            # Aplicando layout corrigido
-            layout_p = LAYOUT.copy()
-            layout_p.update(dict(legend=dict(orientation="h", yanchor="bottom", y=-0.4, xanchor="center", x=0.5)))
-            fig_estab.update_layout(layout_p)
-            fig_estab.update_traces(textinfo='percent+label')
-            
-            # Adicionado config para desativar comportamento de touch
-            st.plotly_chart(fig_estab, use_container_width=True, config={'displayModeBar': False})
-
 # ── ABA 5: STAFF (SOMENTE ADMIN) ──────────────────────────────────────────────
-if is_admin():
+if "perfil" in st.session_state and is_admin():
     with abas[5]:
         st.markdown('<div class="sec-eyebrow">Configurações</div><div class="sec-title">Membros do Sistema</div>', unsafe_allow_html=True)
         novo_nome_user = st.text_input("Nome Completo", key="txt_nome_user")
