@@ -64,10 +64,17 @@ def criar_tabela():
 def autenticar_usuario(username, senha):
     conn = obter_conexao()
     cursor = conn.cursor(cursor_factory=DictCursor)
-    # Criptografa a senha digitada para comparar com o código salvo no banco
+    
+    # 1. Tenta logar usando a senha criptografada (padrão seguro atual)
     senha_criptografada = gerar_hash_senha(senha)
     cursor.execute("SELECT * FROM usuarios WHERE username = %s AND senha = %s;", (username, senha_criptografada))
     usuario = cursor.fetchone()
+    
+    # 2. Se não achar, tenta logar usando a senha em texto comum (para não travar usuários antigos)
+    if not usuario:
+        cursor.execute("SELECT * FROM usuarios WHERE username = %s AND senha = %s;", (username, senha))
+        usuario = cursor.fetchone()
+        
     cursor.close()
     conn.close()
     return usuario
