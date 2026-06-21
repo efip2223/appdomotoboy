@@ -238,6 +238,7 @@ with st.sidebar:
     if st.button("Sair da Conta", use_container_width=True):
         for k in ["usuario", "username", "perfil"]:
             st.session_state.pop(k, None)
+        st.cache_data.clear()
         st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -273,9 +274,10 @@ with abas[0]:
             st.warning("Preencha todos os campos antes de registrar.")
         else:
             database.cadastrar_entregas(bairro, valor, status_pagamento, estabelecimento, str(date.today()), username_atual())
+            st.cache_data.clear()
             st.success("Entrega registrada com sucesso.")
 
-# ── ABA 1: VER ENTREGAS (COM EXCLUSÃO ATUALIZANDO CACHE) ──────────────────────
+# ── ABA 1: VER ENTREGAS (CORRIGIDO PARA LIMPEZA TOTAL IMEDIATA) ───────────────
 with abas[1]:
     st.markdown('<div class="sec-eyebrow">Histórico</div><div class="sec-title">Entregas</div>', unsafe_allow_html=True)
     filtro_user = None if is_admin() else username_atual()
@@ -309,7 +311,8 @@ with abas[1]:
         st.markdown("<br><hr style='border-color:"+C_BORDER+";'>", unsafe_allow_html=True)
         st.markdown('<div class="sec-eyebrow">Ajustes</div><div class="sec-title" style="font-size:0.95rem; border:none; margin-bottom:0.5rem;">Registrou algo errado? Apague aqui:</div>', unsafe_allow_html=True)
         
-        minhas_entregas = df[df["Usuario"] == username_atual()]
+        # Filtro garante exibição correta dos registros próprios
+        minhas_entregas = df[(df["Usuario"] == username_atual()) | (df["Usuario"] == st.session_state.get("usuario"))]
         if minhas_entregas.empty:
             st.caption("Nenhum registro próprio disponível para correção.")
         else:
@@ -319,8 +322,8 @@ with abas[1]:
                 with col_btn:
                     st.markdown('<div class="btn-danger-custom">', unsafe_allow_html=True)
                     if st.button("✕ Excluir", key=f"del_entrega_{int(row['ID'])}", use_container_width=True):
-                        database.deletar_entrega_por_id(int(row["ID"]), username_atual())
-                        st.cache_data.clear()  # Força a limpeza do cache para recalcular os gráficos e totais
+                        database.deletar_entrega_por_id(int(row["ID"]), row["Usuario"])
+                        st.cache_data.clear()  # Limpa o cache de dados global do Streamlit
                         st.rerun()
                     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -349,6 +352,7 @@ with abas[2]:
                     st.markdown('<div class="btn-success">', unsafe_allow_html=True)
                     if st.button("✓ Baixar Pago", key=f"pagar_{int(row['ID'])}", use_container_width=True):
                         database.atualizar_status(int(row["ID"]), "Pago")
+                        st.cache_data.clear()
                         st.rerun()
                     st.markdown("</div><hr style='margin:6px 0;'>", unsafe_allow_html=True)
 
@@ -359,6 +363,7 @@ with abas[3]:
     if st.button("Cadastrar Loja", use_container_width=True, key="btn_cad_loja"):
         if novo_nome.strip():
             database.cadastrar_estabelecimento(novo_nome.strip())
+            st.cache_data.clear()
             st.rerun()
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -370,10 +375,11 @@ with abas[3]:
             st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
             if st.button("✕", key=f"del_{e_id}", use_container_width=True):
                 database.deletar_estabelecimento(id_=e_id)
+                st.cache_data.clear()
                 st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
-# ── ABA 4: PAINEL/RELATÓRIOS (RESTAURADO COM FILTRO SEGURO) ───────────────────
+# ── ABA 4: PAINEL/RELATÓRIOS (COMPACTO COM EXPANDER E GRÁFICO REDONDO) ────────
 with abas[4]:
     st.markdown('<div class="sec-eyebrow">Desempenho</div><div class="sec-title">Gráficos e Indicadores Separados</div>', unsafe_allow_html=True)
     filtro_user = None if is_admin() else username_atual()
@@ -403,48 +409,45 @@ with abas[4]:
         
         st.markdown("<br>", unsafe_allow_html=True)
 
-        periodo_selecionado = st.selectbox(
-            "Selecione o período do gráfico detalhado:",
-            ["Tudo (Histórico Completo)", "Hoje", "Esta Semana", "Este Mês"],
-            key="filtro_periodo_painel"
-        )
-
-        if periodo_selecionado == "Hoje":
-            df_filtrado = df_hoje
-            titulo_grafico = "Faturamento por Estabelecimento (Hoje)"
-        elif periodo_selecionado == "Esta Semana":
-            df_filtrado = df_semana
-            titulo_grafico = "Faturamento por Estabelecimento (Esta Semana)"
-        elif periodo_selecionado == "Este Mês":
-            df_filtrado = df_mes
-            titulo_grafico = "Faturamento por Estabelecimento (Este Mês)"
-        else:
-            df_filtrado = df
-            titulo_grafico = "Faturamento Total por Estabelecimento"
-
-        if not df_filtrado.empty:
-            df_agrupado = df_filtrado.groupby("Estabelecimento")["Valor(R$)"].sum().reset_index().sort_values(by="Valor(R$)", ascending=False)
-            
-            fig_periodo = px.bar(
-                df_agrupado, 
-                x="Estabelecimento", 
-                y="Valor(R$)", 
-                template="plotly_dark", 
-                text_auto='.2f',
-                title=titulo_grafico
+        # EXPANDER DO GRÁFICO DE PIZZA (ESTABELECIMENTOS) — MAIS COMPACTO
+        with st.expander("📊 Ver Faturamento por Estabelecimento (Gráfico Redondo)", expanded=True):
+            periodo_selecionado = st.selectbox(
+                "Filtrar período do gráfico:",
+                ["Tudo (Histórico Completo)", "Hoje", "Esta Semana", "Este Mês"],
+                key="filtro_periodo_painel"
             )
-            
-            layout_p = LAYOUT.copy()
-            layout_p.update(dict(xaxis=dict(tickangle=-45, gridcolor=C_BORDER, fixedrange=True)))
-            fig_periodo.update_layout(layout_p)
-            fig_periodo.update_traces(marker_color=C_ACCENT, textposition="outside")
-            
-            st.plotly_chart(fig_periodo, use_container_width=True, config={'displayModeBar': False})
-        else:
-            st.warning(f"Nenhuma entrega registrada para o filtro: {periodo_selecionado}.")
 
-        st.markdown("<br><hr style='border-color:"+C_BORDER+";'><br>", unsafe_allow_html=True)
+            if periodo_selecionado == "Hoje":
+                df_filtrado = df_hoje
+            elif periodo_selecionado == "Esta Semana":
+                df_filtrado = df_semana
+            elif periodo_selecionado == "Este Mês":
+                df_filtrado = df_mes
+            else:
+                df_filtrado = df
 
+            if not df_filtrado.empty:
+                df_agrupado = df_filtrado.groupby("Estabelecimento")["Valor(R$)"].sum().reset_index()
+                
+                # Gráfico redondo (Pizza/Setores) solicitado
+                fig_pizza = px.pie(
+                    df_agrupado,
+                    names="Estabelecimento",
+                    values="Valor(R$)",
+                    template="plotly_dark",
+                    hole=0.4, # Deixa estilo Donut, mais moderno
+                    title=f"Divisão por Loja — {periodo_selecionado}"
+                )
+                
+                fig_pizza.update_layout(LAYOUT)
+                fig_pizza.update_traces(textinfo='percent+value', textposition='inside')
+                st.plotly_chart(fig_pizza, use_container_width=True, config={'displayModeBar': False})
+            else:
+                st.warning(f"Sem registros para o filtro: {periodo_selecionado}.")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Gráfico por Bairro (continua recolhido embaixo para organizar o visual)
         with st.expander("📈 Histórico Total: Faturamento por Bairro", expanded=False):
             df_bairro = df.groupby("Bairro")["Valor(R$)"].sum().reset_index().sort_values(by="Valor(R$)", ascending=False)
             fig_bairro = px.bar(df_bairro, x="Bairro", y="Valor(R$)", template="plotly_dark", text_auto='.2f')
@@ -466,6 +469,7 @@ if "perfil" in st.session_state and is_admin():
         if st.button("Salvar Membro", use_container_width=True, key="btn_cad_user"):
             if novo_nome_user.strip() and novo_user.strip() and nova_senha.strip():
                 database.cadastrar_usuario(username=novo_user, nome=novo_nome_user, senha=nova_senha, perfil=perfil_sel)
+                st.cache_data.clear()
                 st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -478,5 +482,6 @@ if "perfil" in st.session_state and is_admin():
                     st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
                     if st.button("✕", key=f"del_user_{u['id']}", use_container_width=True):
                         database.deletar_usuario(u["id"])
+                        st.cache_data.clear()
                         st.rerun()
                     st.markdown("</div>", unsafe_allow_html=True)
