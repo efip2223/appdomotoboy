@@ -277,10 +277,11 @@ with abas[0]:
             st.cache_data.clear()
             st.success("Entrega registrada com sucesso.")
 
-# ── ABA 1: VER ENTREGAS (CORRIGIDO PARA LIMPEZA TOTAL IMEDIATA) ───────────────
+# ── ABA 1: VER ENTREGAS (FILTRADO 100% PELO USER LOGADO) ─────────────────────
 with abas[1]:
     st.markdown('<div class="sec-eyebrow">Histórico</div><div class="sec-title">Entregas</div>', unsafe_allow_html=True)
-    filtro_user = None if is_admin() else username_atual()
+    
+    filtro_user = username_atual() 
     entregas = database.listar_entregas(username=filtro_user)
 
     if not entregas:
@@ -297,7 +298,6 @@ with abas[1]:
         busca = st.text_input("Filtrar por nome...", placeholder="Bairro ou Loja")
         
         cols_show = ["Bairro", "Estabelecimento", "Valor(R$)", "Status"]
-        if is_admin(): cols_show.append("Usuario")
         df_view = df[cols_show].copy()
 
         if busca:
@@ -307,30 +307,29 @@ with abas[1]:
         df_display["Valor(R$)"] = df_display["Valor(R$)"].apply(fmt_brl)
         st.dataframe(df_display.style.apply(lambda col: ["color: #3fb950" if v == "Pago" else f"color: {C_AMBER}" if v == "Pendente" else "" for v in col], subset=["Status"]), use_container_width=True, hide_index=True)
 
-        # Seção para apagar erros de digitação individuais
         st.markdown("<br><hr style='border-color:"+C_BORDER+";'>", unsafe_allow_html=True)
         st.markdown('<div class="sec-eyebrow">Ajustes</div><div class="sec-title" style="font-size:0.95rem; border:none; margin-bottom:0.5rem;">Registrou algo errado? Apague aqui:</div>', unsafe_allow_html=True)
         
-        # Filtro garante exibição correta dos registros próprios
-        minhas_entregas = df[(df["Usuario"] == username_atual()) | (df["Usuario"] == st.session_state.get("usuario"))]
-        if minhas_entregas.empty:
+        if df.empty:
             st.caption("Nenhum registro próprio disponível para correção.")
         else:
-            for _, row in minhas_entregas.iterrows():
+            for _, row in df.iterrows():
                 col_info, col_btn = st.columns([5, 1])
                 col_info.markdown(f"<div style='font-size:0.8rem; padding:4px 0;'>📦 <b>{row['Estabelecimento']}</b> — {row['Bairro']} ({fmt_brl(row['Valor(R$)'])}) — <span style='color:{C_MUTED};'>{row['Data']}</span></div>", unsafe_allow_html=True)
                 with col_btn:
                     st.markdown('<div class="btn-danger-custom">', unsafe_allow_html=True)
                     if st.button("✕ Excluir", key=f"del_entrega_{int(row['ID'])}", use_container_width=True):
-                        database.deletar_entrega_por_id(int(row["ID"]), row["Usuario"])
-                        st.cache_data.clear()  # Limpa o cache de dados global do Streamlit
+                        database.deletar_entrega_por_id(int(row["ID"]), username_atual())
+                        st.cache_data.clear()
                         st.rerun()
                     st.markdown('</div>', unsafe_allow_html=True)
 
-# ── ABA 2: PENDENTES ──────────────────────────────────────────────────────────
+# ── ABA 2: PENDENTES (CORRIGIDO: FILTRADO APENAS PELO USER LOGADO SEMPRE) ──────
 with abas[2]:
     st.markdown('<div class="sec-eyebrow">Financeiro</div><div class="sec-title">Taxas Pendentes</div>', unsafe_allow_html=True)
-    filtro_user = None if is_admin() else username_atual()
+    
+    # CORREÇÃO CRUCIAL: Bloqueado em buscar estritamente o usuário logado para zerar os valores fantasmas
+    filtro_user = username_atual()
     entregas = database.listar_entregas(username=filtro_user)
 
     if not entregas:
@@ -348,7 +347,7 @@ with abas[2]:
             
             for _, row in df_pend.iterrows():
                 with st.container():
-                    st.markdown(f"<div style='padding:6px 0; font-size:0.85rem;'><b>{row['Estabelecimento']}</b> ({row['Bairro']})<br><span style='color:{C_AMBER}; font-weight:600;'>{fmt_brl(row['Valor(R$)'])}</span> <span style='color:{C_MUTED}; font-size:0.7rem;'>@{row['Usuario']}</span></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='padding:6px 0; font-size:0.85rem;'><b>{row['Estabelecimento']}</b> ({row['Bairro']})<br><span style='color:{C_AMBER}; font-weight:600;'>{fmt_brl(row['Valor(R$)'])}</span></div>", unsafe_allow_html=True)
                     st.markdown('<div class="btn-success">', unsafe_allow_html=True)
                     if st.button("✓ Baixar Pago", key=f"pagar_{int(row['ID'])}", use_container_width=True):
                         database.atualizar_status(int(row["ID"]), "Pago")
@@ -379,10 +378,11 @@ with abas[3]:
                 st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
-# ── ABA 4: PAINEL/RELATÓRIOS (COMPACTO COM EXPANDER E GRÁFICO REDONDO) ────────
+# ── ABA 4: PAINEL/RELATÓRIOS ──────────────────────────────────────────────────
 with abas[4]:
     st.markdown('<div class="sec-eyebrow">Desempenho</div><div class="sec-title">Gráficos e Indicadores Separados</div>', unsafe_allow_html=True)
-    filtro_user = None if is_admin() else username_atual()
+    
+    filtro_user = username_atual()
     entregas = database.listar_entregas(username=filtro_user)
 
     if not entregas:
@@ -409,7 +409,6 @@ with abas[4]:
         
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # EXPANDER DO GRÁFICO DE PIZZA (ESTABELECIMENTOS) — MAIS COMPACTO
         with st.expander("📊 Ver Faturamento por Estabelecimento (Gráfico Redondo)", expanded=True):
             periodo_selecionado = st.selectbox(
                 "Filtrar período do gráfico:",
@@ -429,13 +428,12 @@ with abas[4]:
             if not df_filtrado.empty:
                 df_agrupado = df_filtrado.groupby("Estabelecimento")["Valor(R$)"].sum().reset_index()
                 
-                # Gráfico redondo (Pizza/Setores) solicitado
                 fig_pizza = px.pie(
                     df_agrupado,
                     names="Estabelecimento",
                     values="Valor(R$)",
                     template="plotly_dark",
-                    hole=0.4, # Deixa estilo Donut, mais moderno
+                    hole=0.4, 
                     title=f"Divisão por Loja — {periodo_selecionado}"
                 )
                 
@@ -447,7 +445,6 @@ with abas[4]:
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # Gráfico por Bairro (continua recolhido embaixo para organizar o visual)
         with st.expander("📈 Histórico Total: Faturamento por Bairro", expanded=False):
             df_bairro = df.groupby("Bairro")["Valor(R$)"].sum().reset_index().sort_values(by="Valor(R$)", ascending=False)
             fig_bairro = px.bar(df_bairro, x="Bairro", y="Valor(R$)", template="plotly_dark", text_auto='.2f')
