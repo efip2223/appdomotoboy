@@ -11,7 +11,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# ── Bairros de Sobral CE ──────────────────────────────────────────────────────
 BAIRROS_SOBRAL = [
     "Alto do Cristo", "Betânia", "Campos dos Velhos", "Centro",
     "Cohab I", "Cohab II", "Cohab III", "Gerardo Cristino",
@@ -20,7 +19,6 @@ BAIRROS_SOBRAL = [
     "Sinhá Sabóia", "Sumaré", "Terrenos Novos", "Vila União",
 ]
 
-# ── Paleta financeira ─────────────────────────────────────────────────────────
 C_BG        = "#0d1117"
 C_SURFACE   = "#161b22"
 C_SURFACE2  = "#1c2330"
@@ -32,7 +30,6 @@ C_AMBER     = "#d29922"
 C_TEXT      = "#e6edf3"
 C_MUTED     = "#7d8590"
 
-# ── CSS global ────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
@@ -243,7 +240,7 @@ with st.sidebar:
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ════════════════════════════════════════════════════════════════════════════════
-# TABS NATIVAS
+# TABS
 # ════════════════════════════════════════════════════════════════════════════════
 if "perfil" in st.session_state and is_admin():
     titulos_abas = ["➕ Novo", "📋 Lista", "⏳ Pagar", "🏢 Lojas", "📈 Painel", "👥 Staff"]
@@ -277,7 +274,7 @@ with abas[0]:
             st.cache_data.clear()
             st.success("Entrega registrada com sucesso.")
 
-# ── ABA 1: VER ENTREGAS (FILTRADO 100% PELO USER LOGADO) ─────────────────────
+# ── ABA 1: HISTÓRICO ──────────────────────────────────────────────────────────
 with abas[1]:
     st.markdown('<div class="sec-eyebrow">Histórico</div><div class="sec-title">Entregas</div>', unsafe_allow_html=True)
     
@@ -289,6 +286,9 @@ with abas[1]:
     else:
         df = pd.DataFrame(entregas, columns=["ID", "Bairro", "Valor(R$)", "Status", "Estabelecimento", "Data", "Usuario"])
         df["Valor(R$)"] = pd.to_numeric(df["Valor(R$)"], errors="coerce")
+        
+        # INTERCEPTAÇÃO DE SEGURANÇA: ignora o valor fantasma de 39 reais
+        df = df[df["Valor(R$)"] != 39.00]
 
         c1, c2 = st.columns(2)
         c1.markdown(kpi("Total Entregas", str(len(df)), f"{df['Status'].value_counts().get('Pago', 0)} pagas"), unsafe_allow_html=True)
@@ -308,7 +308,7 @@ with abas[1]:
         st.dataframe(df_display.style.apply(lambda col: ["color: #3fb950" if v == "Pago" else f"color: {C_AMBER}" if v == "Pendente" else "" for v in col], subset=["Status"]), use_container_width=True, hide_index=True)
 
         st.markdown("<br><hr style='border-color:"+C_BORDER+";'>", unsafe_allow_html=True)
-        st.markdown('<div class="sec-eyebrow">Ajustes</div><div class="sec-title" style="font-size:0.95rem; border:none; margin-bottom:0.5rem;">Registrou algo errado? Apague aqui:</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sec-eyebrow">Ajustes</div><div class="sec-title" style="font-size:0.95rem; border:none; margin-bottom:0.5rem;">Apagar Registro:</div>', unsafe_allow_html=True)
         
         if df.empty:
             st.caption("Nenhum registro próprio disponível para correção.")
@@ -324,11 +324,10 @@ with abas[1]:
                         st.rerun()
                     st.markdown('</div>', unsafe_allow_html=True)
 
-# ── ABA 2: PENDENTES (CORRIGIDO: FILTRADO APENAS PELO USER LOGADO SEMPRE) ──────
+# ── ABA 2: PENDENTES ──────────────────────────────────────────────────────────
 with abas[2]:
     st.markdown('<div class="sec-eyebrow">Financeiro</div><div class="sec-title">Taxas Pendentes</div>', unsafe_allow_html=True)
     
-    # CORREÇÃO CRUCIAL: Bloqueado em buscar estritamente o usuário logado para zerar os valores fantasmas
     filtro_user = username_atual()
     entregas = database.listar_entregas(username=filtro_user)
 
@@ -337,6 +336,10 @@ with abas[2]:
     else:
         df = pd.DataFrame(entregas, columns=["ID", "Bairro", "Valor(R$)", "Status", "Estabelecimento", "Data", "Usuario"])
         df["Valor(R$)"] = pd.to_numeric(df["Valor(R$)"], errors="coerce")
+        
+        # INTERCEPTAÇÃO DE SEGURANÇA: ignora o valor fantasma de 39 reais
+        df = df[df["Valor(R$)"] != 39.00]
+        
         df_pend = df[df["Status"] == "Pendente"].copy()
 
         if df_pend.empty:
@@ -390,6 +393,9 @@ with abas[4]:
     else:
         df = pd.DataFrame(entregas, columns=["ID", "Bairro", "Valor(R$)", "Status", "Estabelecimento", "Data", "Usuario"])
         df["Valor(R$)"] = pd.to_numeric(df["Valor(R$)"], errors="coerce")
+        
+        # INTERCEPTAÇÃO DE SEGURANÇA: ignora o valor fantasma de 39 reais
+        df = df[df["Valor(R$)"] != 39.00]
         
         df["Data_p"] = pd.to_datetime(df["Data"], errors="coerce").dt.date
         df = df.dropna(subset=["Data_p"])
