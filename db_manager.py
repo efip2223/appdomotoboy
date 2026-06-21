@@ -4,18 +4,15 @@ import streamlit as st
 import hashlib
 
 def obter_conexao():
-    # Puxa a URL de conexão direto e seguro dos Secrets do Streamlit
     return psycopg2.connect(st.secrets["postgres"]["url"])
 
 def gerar_hash_senha(senha):
-    # Transforma a senha em um código seguro de 64 caracteres (SHA-256)
     return hashlib.sha256(senha.encode()).hexdigest()
 
 def criar_tabela():
     conn = obter_conexao()
     cursor = conn.cursor()
     
-    # 1. Tabela de Usuários
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS usuarios (
         id SERIAL PRIMARY KEY,
@@ -26,7 +23,6 @@ def criar_tabela():
     );
     """)
     
-    # 2. Tabela de Estabelecimentos
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS estabelecimentos (
         id SERIAL PRIMARY KEY,
@@ -34,7 +30,6 @@ def criar_tabela():
     );
     """)
     
-    # 3. Tabela de Entregas
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS entregas (
         id SERIAL PRIMARY KEY,
@@ -47,7 +42,6 @@ def criar_tabela():
     );
     """)
     
-    # Cria um usuário administrador padrão caso o banco esteja totalmente vazio
     cursor.execute("SELECT COUNT(*) FROM usuarios;")
     if cursor.fetchone()[0] == 0:
         senha_segura = gerar_hash_senha("admin123")
@@ -64,15 +58,11 @@ def autenticar_usuario(username, senha):
     conn = obter_conexao()
     cursor = conn.cursor(cursor_factory=DictCursor)
     senha_criptografada = gerar_hash_senha(senha)
-    
-    # Normaliza o username limpando espaços e forçando letras minúsculas
     u_clean = str(username).strip().lower()
     
-    # 1. Tenta logar usando a senha criptografada (padrão seguro atual)
     cursor.execute("SELECT * FROM usuarios WHERE LOWER(TRIM(username)) = %s AND senha = %s;", (u_clean, senha_criptografada))
     usuario = cursor.fetchone()
     
-    # 2. Se não achar, tenta logar usando a senha em texto comum (ponte de compatibilidade)
     if not usuario:
         cursor.execute("SELECT * FROM usuarios WHERE LOWER(TRIM(username)) = %s AND senha = %s;", (u_clean, senha))
         usuario = cursor.fetchone()
@@ -93,8 +83,6 @@ def cadastrar_entregas(bairro, valor, status_pagamento, estabelecimento, data, u
     conn.commit()
     cursor.close()
     conn.close()
-    
-    # Destrói os dados antigos armazenados na memória do Streamlit imediatamente
     st.cache_data.clear()
 
 @st.cache_data(ttl=60)
@@ -124,15 +112,10 @@ def deletar_entrega_por_id(id_entrega, username):
     conn = obter_conexao()
     cursor = conn.cursor()
     u_clean = str(username).strip().lower()
-    
-    # CORREÇÃO DEFINITIVA: Exclui aplicando tratamento rigoroso de texto no banco de dados
     cursor.execute("DELETE FROM entregas WHERE id = %s AND LOWER(TRIM(usuario)) = %s;", (id_entrega, u_clean))
-    
     conn.commit()
     cursor.close()
     conn.close()
-    
-    # Força o Streamlit a apagar o cache e reconsultar do zero absoluto
     st.cache_data.clear()
 
 @st.cache_data(ttl=60)
@@ -178,7 +161,6 @@ def cadastrar_usuario(username, nome, senha, perfil):
     cursor = conn.cursor()
     senha_criptografada = gerar_hash_senha(senha)
     u_clean = str(username).strip().lower()
-    
     cursor.execute("INSERT INTO usuarios (username, nome, senha, perfil) VALUES (%s, %s, %s, %s);", (u_clean, nome, senha_criptografada, perfil))
     conn.commit()
     cursor.close()
