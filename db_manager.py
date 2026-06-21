@@ -149,8 +149,12 @@ def deletar_entrega_por_id(id_entrega, username):
     conn = sqlite3.connect('velox.db')
     cursor = conn.cursor()
     
-    # Exclui a entrega apenas se o ID bater E se pertencer ao usuário logado
-    cursor.execute("DELETE FROM entregas WHERE id = ? AND usuario = ?", (id_entrega, username))
-    
+    try:
+        # Tenta deletar usando a coluna padrão 'id'
+        cursor.execute("DELETE FROM entregas WHERE id = ? AND usuario = ?", (id_entrega, username))
+    except sqlite3.OperationalError:
+        # Se der erro de coluna, tenta usando 'id_entrega' (comum em algumas versões do seu db)
+        cursor.execute("DELETE FROM entregas WHERE id_entrega = ? AND usuario = ?", (id_entrega, username))
+        
     conn.commit()
     conn.close()
