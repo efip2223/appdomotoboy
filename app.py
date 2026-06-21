@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta
 import db_manager as database
 import pandas as pd
 import plotly.express as px
+from streamlit_cookies_controller import CookieController
 
 database.criar_tabela()
 
@@ -10,6 +11,20 @@ st.set_page_config(
     page_title="Velox — Entregas",
     layout="wide",
 )
+
+# Inicializa o controlador de cookies de forma persistente
+controller = CookieController()
+
+# Tenta recuperar o login salvo nos cookies do celular do usuário
+cookie_username = controller.get("velox_username")
+
+if "usuario" not in st.session_state and cookie_username:
+    # Se existe o cookie guardado, loga o usuário automaticamente em milissegundos
+    usuario_salvo = database.obter_usuario_por_username(cookie_username)
+    if usuario_salvo:
+        st.session_state["usuario"]  = usuario_salvo["nome"]
+        st.session_state["username"] = usuario_salvo["username"]
+        st.session_state["perfil"]   = usuario_salvo["perfil"]
 
 BAIRROS_SOBRAL = [
     "Alto do Cristo", "Betânia", "Campos dos Velhos", "Centro",
@@ -124,7 +139,7 @@ section[data-testid="stSidebar"] {{
 .kpi-value-accent {{ color: {C_ACCENT}; font-family: 'JetBrains Mono', monospace; font-size: 1.4rem; font-weight: 600; }}
 .kpi-sub {{ font-size: 0.68rem; color: {C_MUTED}; margin-top: 3px; }}
 
-.stTextInput input, .stNumberInput input, .stSelectbox > div > div {{
+.stTextInput input, .stNumberInput input, .stSelectbox > div > div, .stTextArea textarea {{
     background: {C_SURFACE} !important;
     border: 1px solid {C_BORDER} !important;
     color: {C_TEXT} !important;
@@ -207,16 +222,25 @@ if "usuario" not in st.session_state:
         st.markdown('<div class="login-title">Entrar na conta</div><div class="login-sub">Controle de entregas · Sobral CE</div>', unsafe_allow_html=True)
         u_input = st.text_input("Usuário", placeholder="seu_usuario")
         p_input = st.text_input("Senha", type="password", placeholder="••••••••")
+        
+        # Opção para manter conectado usando cookies persistentes
+        lembrar = st.checkbox("Manter conectado neste telemóvel/celular", value=True)
+        
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("Entrar", use_container_width=True):
             if not u_input or not p_input:
-                st.warning("Preencha usuário e senha.")
+                st.warning("Preencha o usuário e a senha.")
             else:
                 usuario = database.autenticar_usuario(u_input, p_input)
                 if usuario:
                     st.session_state["usuario"]  = usuario["nome"]
                     st.session_state["username"] = usuario["username"]
                     st.session_state["perfil"]   = usuario["perfil"]
+                    
+                    # Guarda o cookie por 30 dias se a opção for marcada
+                    if lembrar:
+                        controller.set("velox_username", usuario["username"], max_age=2592000)
+                    
                     st.rerun()
                 else:
                     st.error("Usuário ou senha incorretos.")
@@ -232,9 +256,9 @@ with st.sidebar:
     st.markdown(f"<div style='background:{C_SURFACE2};border:1px solid {C_BORDER};border-radius:6px;padding:10px 12px;margin-top:10px'><b>{st.session_state['usuario']}</b><span class='perfil-badge {badge_cls}'>{badge_text}</span><br><span style='color:{C_MUTED};font-size:0.7rem'>@{username_atual()}</span></div>", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # BOTÃO DE LIMPEZA FORÇADA PARA RESETAR O BANCO DE DADOS SE HOUVER SOMA FANTASMA
+    # Rolo compressor para resetar faturamento travado/antigo por segurança
     st.markdown('<div class="btn-danger-custom">', unsafe_allow_html=True)
-    if st.button("⚠️ Apagar Todas Minhas Entregas", use_container_width=True):
+    if st.button("⚠️ Apagar Todas as Minhas Entregas", use_container_width=True):
         try:
             conn = database.obter_conexao()
             cursor = conn.cursor()
@@ -253,6 +277,7 @@ with st.sidebar:
     if st.button("Sair da Conta", use_container_width=True):
         for k in ["usuario", "username", "perfil"]:
             st.session_state.pop(k, None)
+        controller.remove("velox_username") # Apaga o cookie se escolher deslogar manualmente
         st.cache_data.clear()
         st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
@@ -366,28 +391,68 @@ with abas[2]:
                         st.rerun()
                     st.markdown("</div><hr style='margin:6px 0;'>", unsafe_allow_html=True)
 
-# ── ABA 3: ESTABELECIMENTOS ───────────────────────────────────────────────────
+# ── ABA 3: ESTABELECIMENTOS (COM IMPORTAÇÃO DO WHATSAPP) ──────────────────────
 with abas[3]:
     st.markdown('<div class="sec-eyebrow">Lojas</div><div class="sec-title">Gerenciar Estabelecimentos</div>', unsafe_allow_html=True)
-    novo_nome = st.text_input("Nome do Local", placeholder="Ex: Burguer Central")
-    if st.button("Cadastrar Loja", use_container_width=True, key="btn_cad_loja"):
-        if novo_nome.strip():
-            database.cadastrar_estabelecimento(novo_nome.strip())
-            st.cache_data.clear()
-            st.rerun()
+    
+    sub_aba1, sub_aba2 = st.tabs(["➕ Cadastro Individual", "📥 Importar em Massa (WhatsApp)"])
+    
+    with sub_aba1:
+        novo_nome = st.text_input("Nome do Local", placeholder="Ex: Burguer Central")
+        if st.button("Cadastrar Loja", use_container_width=True, key="btn_cad_loja"):
+            if novo_nome.strip():
+                database.cadastrar_estabelecimento(novo_nome.strip())
+                st.cache_data.clear()
+                st.success(f"'{novo_nome.strip()}' cadastrado!")
+                st.rerun()
+
+    with sub_aba2:
+        st.markdown("<span style='font-size:0.85rem; color:#7d8590;'>Cole abaixo a lista com os nomes das lojas dos seus grupos do WhatsApp. Pode separar os nomes colocando <b>um por linha</b> ou dividindo por <b>vírgulas (,)</b>.</span>", unsafe_allow_html=True)
+        texto_massa = st.text_area("Lista de Estabelecimentos", placeholder="Loja Exemplo A\nLoja Exemplo B\nLoja C, Loja D", height=150)
+        
+        if st.button("🚀 Cadastrar Lista Completa", use_container_width=True):
+            if texto_massa.strip():
+                linhas = texto_massa.split('\n')
+                lojas_para_adicionar = []
+                
+                for linha in linhas:
+                    partes = linha.split(',')
+                    for parte in partes:
+                        nome_limpo = parte.strip()
+                        if nome_limpo:
+                            lojas_para_adicionar.append(nome_limpo)
+                
+                lojas_para_adicionar = list(set(lojas_para_adicionar))
+                
+                if lojas_para_adicionar:
+                    contador = 0
+                    for loja in lojas_para_adicionar:
+                        database.cadastrar_estabelecimento(loja)
+                        contador += 1
+                    
+                    st.cache_data.clear()
+                    st.success(f"Sucesso! {contador} estabelecimentos adicionados!")
+                    st.rerun()
+            else:
+                st.warning("O bloco de texto está vazio.")
 
     st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown('<div class="sec-title" style="font-size:0.95rem; border:none; margin-bottom:0.5rem;">Lojas Cadastradas:</div>', unsafe_allow_html=True)
+    
     estabs = database.listar_estabelecimentos()
-    for e_id, e_nome in estabs:
-        c_r, c_d = st.columns([5, 1])
-        c_r.markdown(f"<div style='padding:8px 0; border-bottom:1px solid {C_BORDER}; font-size:0.9rem;'>{e_nome}</div>", unsafe_allow_html=True)
-        with c_d:
-            st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
-            if st.button("✕", key=f"del_{e_id}", use_container_width=True):
-                database.deletar_estabelecimento(id_=e_id)
-                st.cache_data.clear()
-                st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
+    if not estabs:
+        st.info("Nenhum estabelecimento cadastrado.")
+    else:
+        for e_id, e_nome in estabs:
+            c_r, c_d = st.columns([5, 1])
+            c_r.markdown(f"<div style='padding:8px 0; border-bottom:1px solid {C_BORDER}; font-size:0.9rem;'>🏢 {e_nome}</div>", unsafe_allow_html=True)
+            with c_d:
+                st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
+                if st.button("✕", key=f"del_{e_id}", use_container_width=True):
+                    database.deletar_estabelecimento(id_=e_id)
+                    st.cache_data.clear()
+                    st.rerun()
+                st.markdown("</div>", unsafe_allow_html=True)
 
 # ── ABA 4: PAINEL/RELATÓRIOS ──────────────────────────────────────────────────
 with abas[4]:
