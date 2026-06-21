@@ -175,3 +175,16 @@ def deletar_usuario(id_):
     cursor.close()
     conn.close()
     st.cache_data.clear()
+
+
+def obter_usuario_por_username(username):
+    conn = obter_conexao()
+    cursor = conn.cursor(cursor_factory=DictCursor)
+    u_clean = str(username).strip().lower()
+    cursor.execute("SELECT * FROM usuarios WHERE LOWER(TRIM(username)) = %s;", (u_clean,))
+    usuario = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    return usuario
+
+
