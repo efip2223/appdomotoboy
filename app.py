@@ -149,7 +149,7 @@ section[data-testid="stSidebar"] {{
     border-radius: 6px !important;
 }}
 .btn-danger-custom > button {{
-    background: #rgba(248,81,73,0.15) !important;
+    background: rgba(248,81,73,0.15) !important;
     border: 1px solid #f85149 !important;
     color: #f85149 !important;
     border-radius: 6px !important;
@@ -275,7 +275,7 @@ with abas[0]:
             database.cadastrar_entregas(bairro, valor, status_pagamento, estabelecimento, str(date.today()), username_atual())
             st.success("Entrega registrada com sucesso.")
 
-# ── ABA 1: VER ENTREGAS (COM CORREÇÃO DE ERROS) ──────────────────────────────
+# ── ABA 1: VER ENTREGAS (COM EXCLUSÃO ATUALIZANDO CACHE) ──────────────────────
 with abas[1]:
     st.markdown('<div class="sec-eyebrow">Histórico</div><div class="sec-title">Entregas</div>', unsafe_allow_html=True)
     filtro_user = None if is_admin() else username_atual()
@@ -305,11 +305,10 @@ with abas[1]:
         df_display["Valor(R$)"] = df_display["Valor(R$)"].apply(fmt_brl)
         st.dataframe(df_display.style.apply(lambda col: ["color: #3fb950" if v == "Pago" else f"color: {C_AMBER}" if v == "Pendente" else "" for v in col], subset=["Status"]), use_container_width=True, hide_index=True)
 
-        # Seção para corrigir erros removendo registros específicos
+        # Seção para apagar erros de digitação individuais
         st.markdown("<br><hr style='border-color:"+C_BORDER+";'>", unsafe_allow_html=True)
         st.markdown('<div class="sec-eyebrow">Ajustes</div><div class="sec-title" style="font-size:0.95rem; border:none; margin-bottom:0.5rem;">Registrou algo errado? Apague aqui:</div>', unsafe_allow_html=True)
         
-        # Filtra apenas as entregas do próprio usuário conectado para exibição de deleção
         minhas_entregas = df[df["Usuario"] == username_atual()]
         if minhas_entregas.empty:
             st.caption("Nenhum registro próprio disponível para correção.")
@@ -321,6 +320,7 @@ with abas[1]:
                     st.markdown('<div class="btn-danger-custom">', unsafe_allow_html=True)
                     if st.button("✕ Excluir", key=f"del_entrega_{int(row['ID'])}", use_container_width=True):
                         database.deletar_entrega_por_id(int(row["ID"]), username_atual())
+                        st.cache_data.clear()  # Força a limpeza do cache para recalcular os gráficos e totais
                         st.rerun()
                     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -373,7 +373,7 @@ with abas[3]:
                 st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
-# ── ABA 4: PAINEL/RELATÓRIOS ──────────────────────────────────────────────────
+# ── ABA 4: PAINEL/RELATÓRIOS (RESTAURADO COM FILTRO SEGURO) ───────────────────
 with abas[4]:
     st.markdown('<div class="sec-eyebrow">Desempenho</div><div class="sec-title">Gráficos e Indicadores Separados</div>', unsafe_allow_html=True)
     filtro_user = None if is_admin() else username_atual()
@@ -405,7 +405,7 @@ with abas[4]:
 
         periodo_selecionado = st.selectbox(
             "Selecione o período do gráfico detalhado:",
-            ["Hoje", "Esta Semana", "Este Mês"],
+            ["Tudo (Histórico Completo)", "Hoje", "Esta Semana", "Este Mês"],
             key="filtro_periodo_painel"
         )
 
@@ -415,9 +415,12 @@ with abas[4]:
         elif periodo_selecionado == "Esta Semana":
             df_filtrado = df_semana
             titulo_grafico = "Faturamento por Estabelecimento (Esta Semana)"
-        else:
+        elif periodo_selecionado == "Este Mês":
             df_filtrado = df_mes
             titulo_grafico = "Faturamento por Estabelecimento (Este Mês)"
+        else:
+            df_filtrado = df
+            titulo_grafico = "Faturamento Total por Estabelecimento"
 
         if not df_filtrado.empty:
             df_agrupado = df_filtrado.groupby("Estabelecimento")["Valor(R$)"].sum().reset_index().sort_values(by="Valor(R$)", ascending=False)
@@ -438,7 +441,7 @@ with abas[4]:
             
             st.plotly_chart(fig_periodo, use_container_width=True, config={'displayModeBar': False})
         else:
-            st.warning("Nenhuma entrega registrada para o período selecionado.")
+            st.warning(f"Nenhuma entrega registrada para o filtro: {periodo_selecionado}.")
 
         st.markdown("<br><hr style='border-color:"+C_BORDER+";'><br>", unsafe_allow_html=True)
 
