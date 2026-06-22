@@ -639,3 +639,241 @@ with abas[3]:
         for e_id, e_nome in estabs_lista:
             col_nome, col_del = st.columns([6, 1])
             col_nome.markdown(
+                f"<div style='padding:10px 0;border-bottom:1px solid {C_BORDER};"
+                f"font-size:0.88rem;'>{e_nome}</div>",
+                unsafe_allow_html=True,
+            )
+            with col_del:
+                st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
+                if st.button("Remover", key=f"del_estab_{e_id}", use_container_width=True):
+                    database.deletar_estabelecimento(id_=e_id)
+                    st.rerun()
+                st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ── ABA 4: PAINEL ────────────────────────────────────────────────────────────
+with abas[4]:
+    st.markdown(
+        '<div class="sec-eyebrow">Desempenho</div>'
+        '<div class="sec-title">Painel de Indicadores</div>',
+        unsafe_allow_html=True,
+    )
+
+    entregas_raw4 = database.listar_entregas(username=username_atual())
+
+    if not entregas_raw4:
+        st.info("Sem dados suficientes para gerar os painéis.")
+    else:
+        df4 = pd.DataFrame(
+            entregas_raw4,
+            columns=["ID", "Bairro", "Valor(R$)", "Status", "Estabelecimento", "Data", "Usuario"],
+        )
+        df4["Valor(R$)"] = pd.to_numeric(df4["Valor(R$)"], errors="coerce")
+        df4["Data_p"]    = parse_data_robusta(df4["Data"])
+        df4 = df4.dropna(subset=["Data_p"])
+
+        # Datas calculadas no fuso configurado
+        hoje       = hoje_br()
+        inicio_sem = hoje - timedelta(days=hoje.weekday())
+        inicio_mes = hoje.replace(day=1)
+
+        df_hoje = df4[df4["Data_p"] == hoje]
+        df_sem  = df4[(df4["Data_p"] >= inicio_sem) & (df4["Data_p"] <= hoje)]
+        df_mes  = df4[(df4["Data_p"] >= inicio_mes) & (df4["Data_p"] <= hoje)]
+
+        # KPIs de período — todas as entregas (bruto)
+        st.markdown(
+            kpi_grid(
+                kpi_html("Hoje",   fmt_brl(df_hoje["Valor(R$)"].sum()), f"{len(df_hoje)} entrega(s)", "green"),
+                kpi_html("Semana", fmt_brl(df_sem["Valor(R$)"].sum()),  f"{len(df_sem)} entrega(s)",  "accent"),
+                kpi_html("Mês",    fmt_brl(df_mes["Valor(R$)"].sum()),  f"{len(df_mes)} entrega(s)",  "amber"),
+            ),
+            unsafe_allow_html=True,
+        )
+
+        # KPIs do mês — recebido vs pendente
+        pagas_mes = df_mes[df_mes["Status"] == "Pago"]["Valor(R$)"].sum()
+        pend_mes  = df_mes[df_mes["Status"] == "Pendente"]["Valor(R$)"].sum()
+        st.markdown(
+            kpi_grid(
+                kpi_html("Recebido no mês",  fmt_brl(pagas_mes), "status Pago",  "green"),
+                kpi_html("Pendente no mês",  fmt_brl(pend_mes),  "a receber",    "amber"),
+            ),
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Resumo por dia ────────────────────────────────────────────────────
+        with st.expander("Resumo por dia", expanded=True):
+            col_d1, col_d2 = st.columns(2)
+            data_ini = col_d1.date_input("De", value=inicio_mes, max_value=hoje, key="resumo_de")
+            data_fim = col_d2.date_input("Até", value=hoje, min_value=data_ini, max_value=hoje, key="resumo_ate")
+
+            df_int = df4[(df4["Data_p"] >= data_ini) & (df4["Data_p"] <= data_fim)].copy()
+
+            if df_int.empty:
+                st.info("Nenhuma entrega no período selecionado.")
+            else:
+                # Agrupamento por dia com separação pago/pendente
+                resumo = (
+                    df_int.groupby("Data_p")
+                    .apply(lambda g: pd.Series({
+                        "Entregas": len(g),
+                        "Total":    g["Valor(R$)"].sum(),
+                        "Recebido": g.loc[g["Status"] == "Pago",     "Valor(R$)"].sum(),
+                        "Pendente": g.loc[g["Status"] == "Pendente", "Valor(R$)"].sum(),
+                    }))
+                    .reset_index()
+                    .sort_values("Data_p", ascending=False)
+                )
+
+                total_per    = resumo["Total"].sum()
+                recebido_per = resumo["Recebido"].sum()
+                pend_per     = resumo["Pendente"].sum()
+                qtd_per      = int(resumo["Entregas"].sum())
+
+                st.markdown(
+                    kpi_grid(
+                        kpi_html("Total do período",    fmt_brl(total_per),    f"{qtd_per} entregas"),
+                        kpi_html("Recebido no período", fmt_brl(recebido_per), "pagas",     "green"),
+                        kpi_html("Pendente no período", fmt_brl(pend_per),     "a receber", "amber"),
+                    ),
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                DIAS_PT  = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+                MESES_PT = ["", "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
+                            "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+
+                for _, linha in resumo.iterrows():
+                    d          = linha["Data_p"]
+                    dia_sem    = DIAS_PT[d.weekday()]
+                    data_fmt   = f"{dia_sem}, {d.day:02d} {MESES_PT[d.month]}"
+                    eh_hoje    = (d == hoje)
+                    borda      = C_ACCENT if eh_hoje else C_BORDER
+                    tag_hoje   = (f" <span style='background:rgba(47,129,247,.15);color:{C_ACCENT};"
+                                  f"font-size:0.6rem;font-weight:700;padding:1px 6px;border-radius:3px;"
+                                  f"letter-spacing:.05em;'>HOJE</span>") if eh_hoje else ""
+                    pct        = (linha["Recebido"] / linha["Total"] * 100) if linha["Total"] > 0 else 0
+
+                    st.markdown(
+                        f"""<div style='background:{C_SURFACE};border:1px solid {borda};
+                            border-radius:10px;padding:14px 16px;margin-bottom:8px;'>
+                            <div style='display:flex;justify-content:space-between;
+                                align-items:center;margin-bottom:10px;'>
+                                <span style='font-weight:700;font-size:0.88rem;color:{C_TEXT};'>
+                                    {data_fmt}{tag_hoje}
+                                </span>
+                                <span style='font-family:JetBrains Mono,monospace;font-size:0.95rem;
+                                    font-weight:700;color:{C_TEXT};'>
+                                    {fmt_brl(linha["Total"])}
+                                </span>
+                            </div>
+                            <div style='display:flex;gap:20px;font-size:0.72rem;
+                                color:{C_MUTED};margin-bottom:10px;'>
+                                <span>{int(linha['Entregas'])} entrega(s)</span>
+                                <span style='color:{C_GREEN};'>Recebido: {fmt_brl(linha["Recebido"])}</span>
+                                <span style='color:{C_AMBER};'>Pendente: {fmt_brl(linha["Pendente"])}</span>
+                            </div>
+                            <div style='background:{C_BORDER};border-radius:4px;height:3px;'>
+                                <div style='background:{C_GREEN};height:3px;width:{pct:.1f}%;
+                                    border-radius:4px;'></div>
+                            </div>
+                            <div style='font-size:0.6rem;color:{C_MUTED};margin-top:4px;'>
+                                {pct:.0f}% recebido
+                            </div>
+                        </div>""",
+                        unsafe_allow_html=True,
+                    )
+
+        # ── Por estabelecimento ───────────────────────────────────────────────
+        with st.expander("Faturamento por estabelecimento", expanded=False):
+            periodo = st.selectbox(
+                "Período",
+                ["Histórico completo", "Hoje", "Esta semana", "Este mês"],
+                key="filtro_periodo_painel",
+            )
+            mapa = {
+                "Hoje": df_hoje, "Esta semana": df_sem,
+                "Este mês": df_mes, "Histórico completo": df4,
+            }
+            df_fil = mapa[periodo]
+
+            if not df_fil.empty:
+                df_agr = df_fil.groupby("Estabelecimento")["Valor(R$)"].sum().reset_index()
+                fig_pie = px.pie(
+                    df_agr, names="Estabelecimento", values="Valor(R$)",
+                    template="plotly_dark", hole=0.4,
+                    title=f"Por estabelecimento — {periodo}",
+                )
+                fig_pie.update_layout(LAYOUT)
+                fig_pie.update_traces(textinfo="percent+value", textposition="inside")
+                st.plotly_chart(fig_pie, use_container_width=True, config={"displayModeBar": False})
+            else:
+                st.warning(f"Sem registros para: {periodo}.")
+
+        # ── Por bairro ────────────────────────────────────────────────────────
+        with st.expander("Faturamento por bairro", expanded=False):
+            df_bairro = (
+                df4.groupby("Bairro")["Valor(R$)"].sum()
+                .reset_index().sort_values("Valor(R$)", ascending=False)
+            )
+            fig_bar = px.bar(
+                df_bairro, x="Bairro", y="Valor(R$)",
+                template="plotly_dark", text_auto=".2f",
+            )
+            layout_b = {**LAYOUT, "xaxis": {**LAYOUT["xaxis"], "tickangle": -45}}
+            fig_bar.update_layout(layout_b)
+            fig_bar.update_traces(marker_color=C_ACCENT, textposition="outside")
+            st.plotly_chart(fig_bar, use_container_width=True, config={"displayModeBar": False})
+
+
+# ── ABA 5: EQUIPE (somente admin) ────────────────────────────────────────────
+if is_admin():
+    with abas[5]:
+        st.markdown(
+            '<div class="sec-eyebrow">Administração</div>'
+            '<div class="sec-title">Equipe</div>',
+            unsafe_allow_html=True,
+        )
+
+        novo_nome_u = st.text_input("Nome completo", key="txt_nome_user")
+        novo_user   = st.text_input("Login (username)", key="txt_login")
+        nova_senha  = st.text_input("Senha", type="password", key="txt_senha")
+        perfil_sel  = st.selectbox("Perfil", ["entregador", "admin"], key="sel_perfil")
+
+        if st.button("Salvar membro", use_container_width=True, key="btn_cad_user"):
+            if novo_nome_u.strip() and novo_user.strip() and nova_senha.strip():
+                try:
+                    database.cadastrar_usuario(
+                        username=novo_user, nome=novo_nome_u,
+                        senha=nova_senha, perfil=perfil_sel,
+                    )
+                    st.success(f"@{novo_user.strip()} cadastrado.")
+                    st.rerun()
+                except Exception:
+                    st.error("Erro: esse username já existe.")
+            else:
+                st.warning("Preencha todos os campos.")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        for u in database.listar_usuarios():
+            b_cls = "badge-admin" if u["perfil"] == "admin" else "badge-entregador"
+            col_r, col_d = st.columns([6, 1])
+            col_r.markdown(
+                f"<div style='padding:8px 0;border-bottom:1px solid {C_BORDER};font-size:0.85rem;'>"
+                f"<b>{u['nome']}</b> <span class='perfil-badge {b_cls}'>{u['perfil']}</span><br>"
+                f"<span style='color:{C_MUTED};'>@{u['username']}</span></div>",
+                unsafe_allow_html=True,
+            )
+            with col_d:
+                if u["username"] != username_atual():
+                    st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
+                    if st.button("Remover", key=f"del_user_{u['id']}", use_container_width=True):
+                        database.deletar_usuario(u["id"])
+                        st.rerun()
+                    st.markdown("</div>", unsafe_allow_html=True)
