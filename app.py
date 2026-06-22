@@ -663,7 +663,6 @@ with abas[4]:
         unsafe_allow_html=True,
     )
 
-    # Única query para toda a aba
     entregas_raw4 = database.listar_entregas(username=username_atual())
 
     if not entregas_raw4:
@@ -674,30 +673,146 @@ with abas[4]:
             columns=["ID", "Bairro", "Valor(R$)", "Status", "Estabelecimento", "Data", "Usuario"],
         )
         df4["Valor(R$)"] = pd.to_numeric(df4["Valor(R$)"], errors="coerce")
-        df4["Data_p"] = pd.to_datetime(df4["Data"], errors="coerce").dt.date
+
+        # ── Normalização robusta de datas ──────────────────────────────────────
+        # Tenta múltiplos formatos para lidar com qualquer variação de banco legado
+        def parse_data_robusta(serie: pd.Series) -> pd.Series:
+            # Formatos mais comuns em ordem de prioridade
+            for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+                parsed = pd.to_datetime(serie, format=fmt, errors="coerce")
+                if parsed.notna().sum() > parsed.isna().sum():
+                    return parsed.dt.date
+            # Fallback: pandas tenta inferir
+            return pd.to_datetime(serie, infer_datetime_format=True, errors="coerce").dt.date
+
+        df4["Data_p"] = parse_data_robusta(df4["Data"])
         df4 = df4.dropna(subset=["Data_p"])
 
-        hoje         = date.today()
-        inicio_sem   = hoje - timedelta(days=hoje.weekday())
-        inicio_mes   = hoje.replace(day=1)
+        hoje       = date.today()
+        inicio_sem = hoje - timedelta(days=hoje.weekday())   # segunda-feira da semana atual
+        inicio_mes = hoje.replace(day=1)                      # primeiro dia do mês atual
 
-        df_hoje  = df4[df4["Data_p"] == hoje]
-        df_sem   = df4[df4["Data_p"] >= inicio_sem]
-        df_mes   = df4[df4["Data_p"] >= inicio_mes]
+        # Filtros comparando objetos date com date — sem ambiguidade de tipo
+        df_hoje = df4[df4["Data_p"] == hoje]
+        df_sem  = df4[(df4["Data_p"] >= inicio_sem) & (df4["Data_p"] <= hoje)]
+        df_mes  = df4[(df4["Data_p"] >= inicio_mes) & (df4["Data_p"] <= hoje)]
 
+        # KPIs topo — soma TODAS as entregas (pagas + pendentes = ganho bruto do período)
         st.markdown(
             kpi_grid(
-                kpi_html("Hoje",    fmt_brl(df_hoje["Valor(R$)"].sum()), f"{len(df_hoje)} entregas", "green"),
-                kpi_html("Semana",  fmt_brl(df_sem["Valor(R$)"].sum()),  f"{len(df_sem)} entregas",  "accent"),
-                kpi_html("Mês",     fmt_brl(df_mes["Valor(R$)"].sum()),  f"{len(df_mes)} entregas",  "amber"),
+                kpi_html("Hoje",   fmt_brl(df_hoje["Valor(R$)"].sum()), f"{len(df_hoje)} entregas", "green"),
+                kpi_html("Semana", fmt_brl(df_sem["Valor(R$)"].sum()),  f"{len(df_sem)} entregas",  "accent"),
+                kpi_html("Mês",    fmt_brl(df_mes["Valor(R$)"].sum()),  f"{len(df_mes)} entregas",  "amber"),
+            ),
+            unsafe_allow_html=True,
+        )
+
+        # KPIs secundários — só pagas vs pendentes do mês
+        pagas_mes   = df_mes[df_mes["Status"] == "Pago"]["Valor(R$)"].sum()
+        pend_mes    = df_mes[df_mes["Status"] == "Pendente"]["Valor(R$)"].sum()
+        st.markdown(
+            kpi_grid(
+                kpi_html("Recebido no Mês",  fmt_brl(pagas_mes), "apenas Pago", "green"),
+                kpi_html("Pendente no Mês",  fmt_brl(pend_mes),  "a receber",   "amber"),
             ),
             unsafe_allow_html=True,
         )
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # Gráfico de pizza — por loja
-        with st.expander("📊 Faturamento por Estabelecimento", expanded=True):
+        # ── Resumo diário ──────────────────────────────────────────────────────
+        with st.expander("📅 Resumo por Dia", expanded=True):
+            # Seletor de intervalo
+            col_d1, col_d2 = st.columns(2)
+            data_ini = col_d1.date_input(
+                "De", value=inicio_mes, max_value=hoje, key="resumo_de"
+            )
+            data_fim = col_d2.date_input(
+                "Até", value=hoje, min_value=data_ini, max_value=hoje, key="resumo_ate"
+            )
+
+            df_intervalo = df4[
+                (df4["Data_p"] >= data_ini) & (df4["Data_p"] <= data_fim)
+            ].copy()
+
+            if df_intervalo.empty:
+                st.info("Nenhuma entrega no período selecionado.")
+            else:
+                # Agrupamento por dia
+                resumo = (
+                    df_intervalo.groupby("Data_p")
+                    .agg(
+                        Entregas=("Valor(R$)", "count"),
+                        Total=("Valor(R$)", "sum"),
+                        Recebido=("Valor(R$)", lambda x: x[df_intervalo.loc[x.index, "Status"] == "Pago"].sum()),
+                        Pendente=("Valor(R$)", lambda x: x[df_intervalo.loc[x.index, "Status"] == "Pendente"].sum()),
+                    )
+                    .reset_index()
+                    .sort_values("Data_p", ascending=False)
+                )
+
+                # Totalizador do período
+                total_periodo  = resumo["Total"].sum()
+                recebido_per   = resumo["Recebido"].sum()
+                pend_per       = resumo["Pendente"].sum()
+                entregas_per   = resumo["Entregas"].sum()
+
+                st.markdown(
+                    kpi_grid(
+                        kpi_html("Total do Período",    fmt_brl(total_periodo), f"{int(entregas_per)} entregas"),
+                        kpi_html("Recebido no Período", fmt_brl(recebido_per),  "status Pago",     "green"),
+                        kpi_html("Pendente no Período", fmt_brl(pend_per),      "a receber",       "amber"),
+                    ),
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # Cards por dia
+                DIAS_PT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+                MESES_PT = ["", "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
+                            "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+
+                for _, linha in resumo.iterrows():
+                    d = linha["Data_p"]
+                    dia_semana = DIAS_PT[d.weekday()]
+                    data_fmt   = f"{dia_semana}, {d.day:02d} {MESES_PT[d.month]}"
+                    eh_hoje    = (d == hoje)
+                    borda_cor  = C_ACCENT if eh_hoje else C_BORDER
+                    label_hoje = f" <span style='color:{C_ACCENT};font-size:0.65rem;font-weight:700;'>HOJE</span>" if eh_hoje else ""
+
+                    pct_recebido = (linha["Recebido"] / linha["Total"] * 100) if linha["Total"] > 0 else 0
+
+                    st.markdown(
+                        f"""<div style='background:{C_SURFACE};border:1px solid {borda_cor};
+                            border-radius:10px;padding:12px 14px;margin-bottom:8px;'>
+                            <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;'>
+                                <span style='font-weight:700;font-size:0.88rem;color:{C_TEXT};'>
+                                    {data_fmt}{label_hoje}
+                                </span>
+                                <span style='font-family:JetBrains Mono,monospace;font-size:0.95rem;
+                                    font-weight:700;color:{C_TEXT};'>
+                                    {fmt_brl(linha["Total"])}
+                                </span>
+                            </div>
+                            <div style='display:flex;gap:16px;font-size:0.72rem;color:{C_MUTED};margin-bottom:8px;'>
+                                <span>📦 {int(linha['Entregas'])} entregas</span>
+                                <span style='color:{C_GREEN};'>✓ {fmt_brl(linha["Recebido"])}</span>
+                                <span style='color:{C_AMBER};'>⏳ {fmt_brl(linha["Pendente"])}</span>
+                            </div>
+                            <div style='background:{C_BORDER};border-radius:4px;height:4px;overflow:hidden;'>
+                                <div style='background:{C_GREEN};height:4px;width:{pct_recebido:.1f}%;
+                                    border-radius:4px;transition:width 0.3s;'></div>
+                            </div>
+                            <div style='font-size:0.62rem;color:{C_MUTED};margin-top:4px;'>
+                                {pct_recebido:.0f}% recebido
+                            </div>
+                        </div>""",
+                        unsafe_allow_html=True,
+                    )
+
+        # ── Gráfico por estabelecimento ────────────────────────────────────────
+        with st.expander("📊 Faturamento por Estabelecimento", expanded=False):
             periodo = st.selectbox(
                 "Período:",
                 ["Tudo", "Hoje", "Esta Semana", "Este Mês"],
@@ -722,7 +837,7 @@ with abas[4]:
             else:
                 st.warning(f"Sem registros para: {periodo}.")
 
-        # Gráfico de barras — por bairro
+        # ── Gráfico por bairro ─────────────────────────────────────────────────
         with st.expander("📈 Faturamento por Bairro (histórico)", expanded=False):
             df_bairro = (
                 df4.groupby("Bairro")["Valor(R$)"]
