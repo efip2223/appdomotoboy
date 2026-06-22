@@ -3,16 +3,13 @@ from psycopg2.extras import DictCursor
 import streamlit as st
 import hashlib
 
-
 # ─── Conexão ────────────────────────────────────────────────────────────────
 
 def obter_conexao():
     return psycopg2.connect(st.secrets["postgres"]["url"])
 
-
 def gerar_hash_senha(senha: str) -> str:
     return hashlib.sha256(senha.encode()).hexdigest()
-
 
 # ─── Setup inicial (roda uma única vez via @st.cache_resource) ───────────────
 
@@ -63,21 +60,17 @@ def criar_tabela():
     cursor.close()
     conn.close()
 
-
 # ─── Cache granular (invalida só o necessário) ───────────────────────────────
 
 def _invalidar_cache_entregas(username: str):
     """Invalida apenas o cache de entregas do usuário afetado."""
     listar_entregas.clear(username=username)
 
-
 def _invalidar_cache_estabelecimentos():
     listar_estabelecimentos.clear()
 
-
 def _invalidar_cache_usuarios():
     listar_usuarios.clear()
-
 
 # ─── Usuários ────────────────────────────────────────────────────────────────
 
@@ -113,7 +106,6 @@ def autenticar_usuario(username: str, senha: str):
     conn.close()
     return usuario
 
-
 def obter_usuario_por_username(username: str):
     conn = obter_conexao()
     cursor = conn.cursor(cursor_factory=DictCursor)
@@ -126,7 +118,6 @@ def obter_usuario_por_username(username: str):
     conn.close()
     return usuario
 
-
 @st.cache_data(ttl=120)
 def listar_usuarios():
     conn = obter_conexao()
@@ -136,7 +127,6 @@ def listar_usuarios():
     cursor.close()
     conn.close()
     return [dict(u) for u in dados]
-
 
 def cadastrar_usuario(username: str, nome: str, senha: str, perfil: str):
     conn = obter_conexao()
@@ -152,7 +142,6 @@ def cadastrar_usuario(username: str, nome: str, senha: str, perfil: str):
     conn.close()
     _invalidar_cache_usuarios()
 
-
 def deletar_usuario(id_: int):
     conn = obter_conexao()
     cursor = conn.cursor()
@@ -161,7 +150,6 @@ def deletar_usuario(id_: int):
     cursor.close()
     conn.close()
     _invalidar_cache_usuarios()
-
 
 # ─── Entregas ────────────────────────────────────────────────────────────────
 
@@ -186,7 +174,6 @@ def listar_entregas(username: str | None = None):
     conn.close()
     return dados
 
-
 def cadastrar_entregas(
     bairro: str,
     valor: float,
@@ -208,7 +195,6 @@ def cadastrar_entregas(
     conn.close()
     _invalidar_cache_entregas(u_clean)
 
-
 def atualizar_status(id_: int, status: str):
     conn = obter_conexao()
     cursor = conn.cursor(cursor_factory=DictCursor)
@@ -221,7 +207,6 @@ def atualizar_status(id_: int, status: str):
     conn.close()
     if row:
         _invalidar_cache_entregas(row["usuario"])
-
 
 def deletar_entrega_por_id(id_entrega: int, username: str):
     conn = obter_conexao()
@@ -236,7 +221,6 @@ def deletar_entrega_por_id(id_entrega: int, username: str):
     conn.close()
     _invalidar_cache_entregas(u_clean)
 
-
 def deletar_todas_entregas_usuario(username: str):
     conn = obter_conexao()
     cursor = conn.cursor()
@@ -249,7 +233,6 @@ def deletar_todas_entregas_usuario(username: str):
     conn.close()
     _invalidar_cache_entregas(u_clean)
 
-
 # ─── Estabelecimentos ────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=120)
@@ -261,7 +244,6 @@ def listar_estabelecimentos():
     cursor.close()
     conn.close()
     return dados
-
 
 def cadastrar_estabelecimento(nome: str) -> bool:
     """Retorna True se inserido, False se já existia (deduplicação)."""
@@ -283,7 +265,6 @@ def cadastrar_estabelecimento(nome: str) -> bool:
     if inserido:
         _invalidar_cache_estabelecimentos()
     return inserido
-
 
 def deletar_estabelecimento(id_: int):
     conn = obter_conexao()
