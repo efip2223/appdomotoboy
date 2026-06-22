@@ -836,44 +836,154 @@ if is_admin():
     with abas[5]:
         st.markdown(
             '<div class="sec-eyebrow">Administração</div>'
-            '<div class="sec-title">Equipe</div>',
+            '<div class="sec-title">Gestão e Desempenho Global</div>',
             unsafe_allow_html=True,
         )
 
-        novo_nome_u = st.text_input("Nome completo", key="txt_nome_user")
-        novo_user   = st.text_input("Login (username)", key="txt_login")
-        nova_senha  = st.text_input("Senha", type="password", key="txt_senha")
-        perfil_sel  = st.selectbox("Perfil", ["entregador", "admin"], key="sel_perfil")
+        sub_membros, sub_desempenho = st.tabs(["Gerenciar Membros", "Ranking e Desempenho"])
 
-        if st.button("Salvar membro", use_container_width=True, key="btn_cad_user"):
-            if novo_nome_u.strip() and novo_user.strip() and nova_senha.strip():
-                try:
-                    database.cadastrar_usuario(
-                        username=novo_user, nome=novo_nome_u,
-                        senha=nova_senha, perfil=perfil_sel,
-                    )
-                    st.success(f"@{novo_user.strip()} cadastrado.")
-                    st.rerun()
-                except Exception:
-                    st.error("Erro: esse username já existe.")
-            else:
-                st.warning("Preencha todos os campos.")
+        # ── SUB-ABA: GERENCIAR MEMBROS ───────────────────────────────────────
+        with sub_membros:
+            st.markdown("<br>", unsafe_allow_html=True)
+            novo_nome_u = st.text_input("Nome completo", key="txt_nome_user")
+            novo_user   = st.text_input("Login (username)", key="txt_login")
+            nova_senha  = st.text_input("Senha", type="password", key="txt_senha")
+            perfil_sel  = st.selectbox("Perfil", ["entregador", "admin"], key="sel_perfil")
 
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        for u in database.listar_usuarios():
-            b_cls = "badge-admin" if u["perfil"] == "admin" else "badge-entregador"
-            col_r, col_d = st.columns([6, 1])
-            col_r.markdown(
-                f"<div style='padding:8px 0;border-bottom:1px solid {C_BORDER};font-size:0.85rem;'>"
-                f"<b>{u['nome']}</b> <span class='perfil-badge {b_cls}'>{u['perfil']}</span><br>"
-                f"<span style='color:{C_MUTED};'>@{u['username']}</span></div>",
-                unsafe_allow_html=True,
-            )
-            with col_d:
-                if u["username"] != username_atual():
-                    st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
-                    if st.button("Remover", key=f"del_user_{u['id']}", use_container_width=True):
-                        database.deletar_usuario(u["id"])
+            if st.button("Salvar membro", use_container_width=True, key="btn_cad_user"):
+                if novo_nome_u.strip() and novo_user.strip() and nova_senha.strip():
+                    try:
+                        database.cadastrar_usuario(
+                            username=novo_user, nome=novo_nome_u,
+                            senha=nova_senha, perfil=perfil_sel,
+                        )
+                        st.success(f"@{novo_user.strip()} cadastrado.")
                         st.rerun()
-                    st.markdown("</div>", unsafe_allow_html=True)
+                    except Exception:
+                        st.error("Erro: esse username já existe.")
+                else:
+                    st.warning("Preencha todos os campos.")
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            for u in database.listar_usuarios():
+                b_cls = "badge-admin" if u["perfil"] == "admin" else "badge-entregador"
+                col_r, col_d = st.columns([6, 1])
+                col_r.markdown(
+                    f"<div style='padding:8px 0;border-bottom:1px solid {C_BORDER};font-size:0.85rem;'>"
+                    f"<b>{u['nome']}</b> <span class='perfil-badge {b_cls}'>{u['perfil']}</span><br>"
+                    f"<span style='color:{C_MUTED};'>@{u['username']}</span></div>",
+                    unsafe_allow_html=True,
+                )
+                with col_d:
+                    if u["username"] != username_atual():
+                        st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
+                        if st.button("Remover", key=f"del_user_{u['id']}", use_container_width=True):
+                            database.deletar_usuario(u["id"])
+                            st.rerun()
+                        st.markdown("</div>", unsafe_allow_html=True)
+
+        # ── SUB-ABA: DESEMPENHO DA EQUIPE ────────────────────────────────────
+        with sub_desempenho:
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            entregas_geral = database.listar_entregas()
+
+            if not entregas_geral:
+                st.info("A equipe ainda não registrou nenhuma entrega.")
+            else:
+                df_global = pd.DataFrame(
+                    entregas_geral,
+                    columns=["ID", "Bairro", "Valor(R$)", "Status", "Estabelecimento", "Data", "Usuario"],
+                )
+                df_global["Valor(R$)"] = pd.to_numeric(df_global["Valor(R$)"], errors="coerce")
+                
+                # Prepara as datas usando a mesma função robusta do app
+                df_global["Data_p"] = parse_data_robusta(df_global["Data"])
+                df_global = df_global.dropna(subset=["Data_p"])
+
+                # Filtro de Período
+                col_f1, col_f2 = st.columns(2)
+                h_admin = hoje_br()
+                ini_admin = h_admin.replace(day=1)
+                
+                dt_ini = col_f1.date_input("Filtrar de", value=ini_admin, max_value=h_admin, key="rank_ini")
+                dt_fim = col_f2.date_input("Até", value=h_admin, min_value=dt_ini, max_value=h_admin, key="rank_fim")
+                
+                df_filtro = df_global[(df_global["Data_p"] >= dt_ini) & (df_global["Data_p"] <= dt_fim)].copy()
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                if df_filtro.empty:
+                    st.warning("Nenhuma entrega registrada neste período específico.")
+                else:
+                    total_equipe_valor = df_filtro["Valor(R$)"].sum()
+                    total_equipe_qtd = len(df_filtro)
+                    pagos_equipe = df_filtro[df_filtro["Status"] == "Pago"]["Valor(R$)"].sum()
+                    pendentes_equipe = df_filtro[df_filtro["Status"] == "Pendente"]["Valor(R$)"].sum()
+
+                    # KPIs Globais da Equipe (Filtrados)
+                    st.markdown(
+                        kpi_grid(
+                            kpi_html("Arrecadação", fmt_brl(total_equipe_valor), f"{total_equipe_qtd} entregas no período", "accent"),
+                            kpi_html("Já Recebido", fmt_brl(pagos_equipe), "pela equipe", "green"),
+                            kpi_html("Pendente", fmt_brl(pendentes_equipe), "na rua", "amber"),
+                        ),
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown("<br>", unsafe_allow_html=True)
+
+                    # Agrupamento para criar o Ranking
+                    ranking = (
+                        df_filtro.groupby("Usuario")
+                        .agg(
+                            Total_Entregas=("ID", "count"),
+                            Valor_Arrecadado=("Valor(R$)", "sum")
+                        )
+                        .reset_index()
+                        .sort_values(by="Total_Entregas", ascending=False)
+                    )
+
+                    st.markdown(
+                        f'<div style="font-size:0.9rem;font-weight:600;color:{C_TEXT};margin-bottom:10px;">'
+                        f'🏆 Ranking do Período</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                    # Gráfico de Barras do Ranking
+                    fig_rank = px.bar(
+                        ranking, 
+                        x="Usuario", 
+                        y="Total_Entregas", 
+                        text="Total_Entregas",
+                        hover_data={"Valor_Arrecadado": ":.2f"},
+                        template="plotly_dark",
+                        labels={"Usuario": "Entregador", "Total_Entregas": "Qtd. de Entregas", "Valor_Arrecadado": "Valor Total (R$)"}
+                    )
+                    fig_rank.update_traces(marker_color=C_ACCENT, textposition="outside")
+                    fig_rank.update_layout(LAYOUT)
+                    st.plotly_chart(fig_rank, use_container_width=True, config={"displayModeBar": False})
+
+                    # Tabela detalhada do Ranking
+                    for i, row in ranking.reset_index(drop=True).iterrows():
+                        pos = i + 1
+                        medalha = "🥇" if pos == 1 else "🥈" if pos == 2 else "🥉" if pos == 3 else "🏅"
+                        st.markdown(
+                            f"""<div style='background:{C_SURFACE};border:1px solid {C_BORDER};
+                                border-radius:8px;padding:12px 14px;margin-bottom:6px;display:flex;
+                                justify-content:space-between;align-items:center;'>
+                                <div>
+                                    <span style='font-size:1.1rem;margin-right:8px;'>{medalha}</span>
+                                    <span style='font-weight:600;color:{C_TEXT};'>@{row['Usuario']}</span>
+                                </div>
+                                <div style='text-align:right;'>
+                                    <div style='font-family:JetBrains Mono,monospace;font-weight:700;color:{C_GREEN};'>
+                                        {fmt_brl(row['Valor_Arrecadado'])}
+                                    </div>
+                                    <div style='font-size:0.7rem;color:{C_MUTED};'>
+                                        {row['Total_Entregas']} entregas
+                                    </div>
+                                </div>
+                            </div>""",
+                            unsafe_allow_html=True
+                        )
