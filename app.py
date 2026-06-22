@@ -1,19 +1,25 @@
 import streamlit as st
-from datetime import date, timedelta
+from datetime import timedelta
+from zoneinfo import ZoneInfo
 import db_manager as database
 import pandas as pd
 import plotly.express as px
 from streamlit_cookies_controller import CookieController
 
-# ─── Setup (uma única vez por processo) ─────────────────────────────────────
+# ─── Setup ───────────────────────────────────────────────────────────────────
 database.criar_tabela()
 
-st.set_page_config(
-    page_title="Velox — Entregas",
-    layout="wide",
-)
+st.set_page_config(page_title="Velox — Entregas", layout="wide")
 
-# ─── Cores ──────────────────────────────────────────────────────────────────
+# Fuso horário de Fortaleza/Sobral (UTC-3, sem horário de verão)
+TZ_BR = ZoneInfo("America/Fortaleza")
+
+def hoje_br():
+    """Data atual no fuso de Fortaleza — corrige o bug do servidor UTC."""
+    from datetime import datetime
+    return datetime.now(TZ_BR).date()
+
+# ─── Cores ───────────────────────────────────────────────────────────────────
 C_BG        = "#0d1117"
 C_SURFACE   = "#161b22"
 C_SURFACE2  = "#1c2330"
@@ -27,20 +33,17 @@ C_RED_DIM   = "rgba(248,81,73,0.12)"
 C_TEXT      = "#e6edf3"
 C_MUTED     = "#7d8590"
 
-# ─── CSS global (mobile-first) ───────────────────────────────────────────────
+# ─── CSS ─────────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap');
 
-/* Reset de overflow horizontal */
 html, body {{ overflow-x: hidden !important; max-width: 100vw !important; }}
-
 html, body, [class*="css"] {{
     font-family: 'Inter', sans-serif;
     color: {C_TEXT};
     -webkit-tap-highlight-color: transparent;
 }}
-
 .stApp {{ background: {C_BG}; overflow-x: hidden !important; }}
 
 section[data-testid="stSidebar"] {{
@@ -48,7 +51,6 @@ section[data-testid="stSidebar"] {{
     border-right: 1px solid {C_BORDER} !important;
 }}
 
-/* ── Brand ── */
 .brand {{
     font-family: 'Inter', sans-serif;
     font-size: 1.4rem;
@@ -72,7 +74,6 @@ section[data-testid="stSidebar"] {{
     vertical-align: middle;
 }}
 
-/* ── Tipografia ── */
 .sec-title {{
     font-size: 1.05rem;
     font-weight: 600;
@@ -91,7 +92,6 @@ section[data-testid="stSidebar"] {{
     margin-bottom: 4px;
 }}
 
-/* ── KPI cards ── */
 .kpi-grid {{
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
@@ -125,7 +125,6 @@ section[data-testid="stSidebar"] {{
 .kpi-value.accent {{ color: {C_ACCENT}; }}
 .kpi-sub {{ font-size: 0.65rem; color: {C_MUTED}; margin-top: 4px; }}
 
-/* ── Inputs ── */
 .stTextInput input,
 .stNumberInput input,
 .stSelectbox > div > div,
@@ -134,11 +133,10 @@ section[data-testid="stSidebar"] {{
     border: 1px solid {C_BORDER} !important;
     color: {C_TEXT} !important;
     border-radius: 8px !important;
-    font-size: 1rem !important;      /* 16px evita zoom automático no iOS */
-    min-height: 44px !important;     /* área de toque mínima recomendada */
+    font-size: 1rem !important;
+    min-height: 44px !important;
 }}
 
-/* ── Botões — tamanho de toque confortável ── */
 .stButton > button {{
     background: {C_ACCENT} !important;
     color: #fff !important;
@@ -176,7 +174,6 @@ section[data-testid="stSidebar"] {{
     font-weight: 600 !important;
 }}
 
-/* ── Tabs ── */
 div[data-testid="stTabs"] button {{
     color: {C_MUTED} !important;
     font-weight: 600 !important;
@@ -188,7 +185,6 @@ div[data-testid="stTabs"] button[aria-selected="true"] {{
     border-bottom-color: {C_ACCENT} !important;
 }}
 
-/* ── Card de entrega (substitui o dataframe no mobile) ── */
 .entrega-card {{
     background: {C_SURFACE};
     border: 1px solid {C_BORDER};
@@ -213,13 +209,11 @@ div[data-testid="stTabs"] button[aria-selected="true"] {{
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.95rem;
     font-weight: 600;
-    color: {C_GREEN};
     white-space: nowrap;
 }}
-.badge-pago    {{ color: {C_GREEN}; font-size: 0.68rem; font-weight: 600; }}
-.badge-pendente{{ color: {C_AMBER}; font-size: 0.68rem; font-weight: 600; }}
+.status-pago    {{ color: {C_GREEN}; font-size: 0.68rem; font-weight: 600; }}
+.status-pendente{{ color: {C_AMBER}; font-size: 0.68rem; font-weight: 600; }}
 
-/* ── Perfil badge ── */
 .perfil-badge {{
     display: inline-block;
     font-size: 0.65rem;
@@ -231,15 +225,14 @@ div[data-testid="stTabs"] button[aria-selected="true"] {{
     letter-spacing: 0.06em;
     vertical-align: middle;
 }}
-.badge-admin       {{ background: rgba(47,129,247,.15); color: {C_ACCENT}; border: 1px solid {C_ACCENT}; }}
-.badge-entregador  {{ background: rgba(63,185,80,.12);  color: {C_GREEN};  border: 1px solid {C_GREEN};  }}
+.badge-admin      {{ background: rgba(47,129,247,.15); color: {C_ACCENT}; border: 1px solid {C_ACCENT}; }}
+.badge-entregador {{ background: rgba(63,185,80,.12);  color: {C_GREEN};  border: 1px solid {C_GREEN};  }}
 
-/* ── Expanders ── */
 .streamlit-expanderHeader {{ font-weight: 600 !important; font-size: 0.9rem !important; }}
 </style>
 """, unsafe_allow_html=True)
 
-# ─── Plotly layout base ───────────────────────────────────────────────────────
+# ─── Plotly base ──────────────────────────────────────────────────────────────
 LAYOUT = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
@@ -251,7 +244,6 @@ LAYOUT = dict(
 )
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
-
 def fmt_brl(valor: float) -> str:
     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
@@ -264,27 +256,31 @@ def username_atual() -> str:
 def kpi_html(label: str, value: str, sub: str = "", color: str = "") -> str:
     cls = f"kpi-value {color}".strip()
     sub_html = f'<div class="kpi-sub">{sub}</div>' if sub else ""
-    return f"""
-    <div class="kpi-card">
+    return f"""<div class="kpi-card">
         <div class="kpi-label">{label}</div>
         <div class="{cls}">{value}</div>
         {sub_html}
     </div>"""
 
 def kpi_grid(*cards: str) -> str:
-    inner = "".join(cards)
-    return f'<div class="kpi-grid">{inner}</div>'
+    return f'<div class="kpi-grid">{"".join(cards)}</div>'
+
+def parse_data_robusta(serie: pd.Series) -> pd.Series:
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+        parsed = pd.to_datetime(serie, format=fmt, errors="coerce")
+        if parsed.notna().sum() > parsed.isna().sum():
+            return parsed.dt.date
+    return pd.to_datetime(serie, infer_datetime_format=True, errors="coerce").dt.date
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# COOKIE CONTROLLER — inicializado uma única vez
+# COOKIE CONTROLLER
 # ════════════════════════════════════════════════════════════════════════════
 if "cookie_controller" not in st.session_state:
     st.session_state["cookie_controller"] = CookieController()
 
 controller: CookieController = st.session_state["cookie_controller"]
 
-# Auto-login via cookie
 if "usuario" not in st.session_state:
     cookie_username = controller.get("velox_username")
     if cookie_username:
@@ -296,7 +292,7 @@ if "usuario" not in st.session_state:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# TELA DE LOGIN
+# LOGIN
 # ════════════════════════════════════════════════════════════════════════════
 if "usuario" not in st.session_state:
     st.markdown(
@@ -309,14 +305,15 @@ if "usuario" not in st.session_state:
     with col_form:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown(
-            f"<div style='font-size:1.1rem;font-weight:700;color:{C_TEXT};margin-bottom:4px;'>Entrar na conta</div>"
-            f"<div style='font-size:0.78rem;color:{C_MUTED};margin-bottom:20px;'>Controle de entregas · Sobral CE</div>",
+            f"<div style='font-size:1.1rem;font-weight:700;color:{C_TEXT};margin-bottom:4px;'>"
+            f"Acessar conta</div>"
+            f"<div style='font-size:0.78rem;color:{C_MUTED};margin-bottom:20px;'>"
+            f"Controle de entregas · Sobral CE</div>",
             unsafe_allow_html=True,
         )
         u_input = st.text_input("Usuário", placeholder="seu_usuario", key="li_user")
         p_input = st.text_input("Senha", type="password", placeholder="••••••••", key="li_pass")
-        lembrar = st.checkbox("Manter conectado neste celular", value=True)
-
+        lembrar = st.checkbox("Manter conectado neste dispositivo", value=True)
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("Entrar", use_container_width=True, key="btn_login"):
             if not u_input or not p_input:
@@ -344,7 +341,6 @@ with st.sidebar:
         '<span class="brand-tag">Beta</span></div>',
         unsafe_allow_html=True,
     )
-
     badge_cls  = "badge-admin" if is_admin() else "badge-entregador"
     badge_text = "Admin" if is_admin() else "Entregador"
     st.markdown(
@@ -356,12 +352,10 @@ with st.sidebar:
         </div>""",
         unsafe_allow_html=True,
     )
-
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Botão de logout
     st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
-    if st.button("Sair da Conta", use_container_width=True, key="btn_sair"):
+    if st.button("Sair da conta", use_container_width=True, key="btn_sair"):
         for k in ["usuario", "username", "perfil"]:
             st.session_state.pop(k, None)
         controller.remove("velox_username")
@@ -370,16 +364,16 @@ with st.sidebar:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Reset perigoso — escondido em expander para evitar clique acidental
-    with st.expander("⚠️ Zona de perigo"):
+    with st.expander("Zona de perigo"):
         st.markdown(
-            f"<p style='font-size:0.78rem;color:{C_MUTED};'>Apaga permanentemente <b>todas</b> as suas entregas. Não tem como desfazer.</p>",
+            f"<p style='font-size:0.78rem;color:{C_MUTED};'>"
+            f"Apaga permanentemente todas as suas entregas. Irreversível.</p>",
             unsafe_allow_html=True,
         )
         st.markdown('<div class="btn-danger">', unsafe_allow_html=True)
-        if st.button("Apagar Todas as Minhas Entregas", use_container_width=True, key="btn_reset"):
+        if st.button("Apagar todas as minhas entregas", use_container_width=True, key="btn_reset"):
             database.deletar_todas_entregas_usuario(username_atual())
-            st.success("Histórico resetado!")
+            st.success("Histórico apagado.")
             st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -399,9 +393,9 @@ BAIRROS_SOBRAL = sorted([
 # ════════════════════════════════════════════════════════════════════════════
 # TABS
 # ════════════════════════════════════════════════════════════════════════════
-titulos_abas = ["➕ Novo", "📋 Lista", "⏳ Pagar", "🏢 Lojas", "📈 Painel"]
+titulos_abas = ["Novo", "Entregas", "Pendentes", "Lojas", "Painel"]
 if is_admin():
-    titulos_abas.append("👥 Staff")
+    titulos_abas.append("Equipe")
 
 abas = st.tabs(titulos_abas)
 
@@ -414,22 +408,20 @@ with abas[0]:
         unsafe_allow_html=True,
     )
 
-    # Bairro
-    bairros_opcoes = ["Selecionar bairro..."] + BAIRROS_SOBRAL + ["Outro (digitar)"]
+    bairros_opcoes = ["Selecionar bairro..."] + BAIRROS_SOBRAL + ["Outro"]
     bairro_sel = st.selectbox("Bairro", bairros_opcoes, key="sel_bairro")
-    if bairro_sel == "Outro (digitar)":
+    if bairro_sel == "Outro":
         bairro = st.text_input("Nome do bairro", placeholder="Digite o bairro", key="txt_bairro")
     elif bairro_sel == "Selecionar bairro...":
         bairro = ""
     else:
         bairro = bairro_sel
 
-    # Estabelecimento
     estabs = database.listar_estabelecimentos()
     nomes_estabs = [e[1] for e in estabs]
-    opcoes_estab = ["Selecionar estabelecimento..."] + nomes_estabs + ["Outro (digitar)"]
+    opcoes_estab = ["Selecionar estabelecimento..."] + nomes_estabs + ["Outro"]
     estab_sel = st.selectbox("Estabelecimento", opcoes_estab, key="sel_estab")
-    if estab_sel == "Outro (digitar)":
+    if estab_sel == "Outro":
         estabelecimento = st.text_input("Nome do estabelecimento", placeholder="Digite o nome", key="txt_estab")
     elif estab_sel == "Selecionar estabelecimento...":
         estabelecimento = ""
@@ -437,20 +429,21 @@ with abas[0]:
         estabelecimento = estab_sel
 
     valor = st.number_input("Valor (R$)", min_value=0.0, format="%.2f", step=0.50)
-    status_pagamento = st.selectbox("Pagamento", ["Pendente", "Pago"])
+    status_pagamento = st.selectbox("Status do pagamento", ["Pendente", "Pago"])
 
     st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("✅ Registrar Entrega", use_container_width=True, key="btn_reg"):
+    if st.button("Registrar entrega", use_container_width=True, key="btn_reg"):
         if not bairro.strip() or not estabelecimento.strip():
             st.warning("Preencha todos os campos antes de registrar.")
         elif valor <= 0:
             st.warning("Informe um valor maior que R$ 0,00.")
         else:
+            # Salva com a data correta no fuso de Fortaleza
             database.cadastrar_entregas(
                 bairro.strip(), valor, status_pagamento,
-                estabelecimento.strip(), str(date.today()), username_atual()
+                estabelecimento.strip(), str(hoje_br()), username_atual()
             )
-            st.success("✓ Entrega registrada!")
+            st.success("Entrega registrada.")
 
 
 # ── ABA 1: HISTÓRICO ─────────────────────────────────────────────────────────
@@ -472,19 +465,19 @@ with abas[1]:
         )
         df["Valor(R$)"] = pd.to_numeric(df["Valor(R$)"], errors="coerce")
 
-        total_pagas   = int(df["Status"].value_counts().get("Pago", 0))
-        total_pend    = int(df["Status"].value_counts().get("Pendente", 0))
-        receita_conf  = df[df["Status"] == "Pago"]["Valor(R$)"].sum()
+        total_pagas  = int(df["Status"].value_counts().get("Pago", 0))
+        total_pend   = int(df["Status"].value_counts().get("Pendente", 0))
+        receita_conf = df[df["Status"] == "Pago"]["Valor(R$)"].sum()
 
         st.markdown(
             kpi_grid(
-                kpi_html("Total de Entregas", str(len(df)), f"{total_pagas} pagas · {total_pend} pend."),
-                kpi_html("Receita Confirmada", fmt_brl(receita_conf), "caixa atual", "green"),
+                kpi_html("Total de Entregas", str(len(df)), f"{total_pagas} pagas · {total_pend} pendentes"),
+                kpi_html("Receita Confirmada", fmt_brl(receita_conf), "somente pagas", "green"),
             ),
             unsafe_allow_html=True,
         )
 
-        busca = st.text_input("🔍 Filtrar por bairro ou loja...", key="busca_hist")
+        busca = st.text_input("Buscar por bairro ou estabelecimento", key="busca_hist")
 
         df_view = df.copy()
         if busca:
@@ -496,25 +489,26 @@ with abas[1]:
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # Cards mobile-friendly em vez de dataframe
         for _, row in df_view.iterrows():
-            badge_cls = "badge-pago" if row["Status"] == "Pago" else "badge-pendente"
-            badge_sym = "✓ Pago" if row["Status"] == "Pago" else "⏳ Pendente"
+            s_cls = "status-pago" if row["Status"] == "Pago" else "status-pendente"
+            s_txt = "Pago" if row["Status"] == "Pago" else "Pendente"
+            v_cor = C_GREEN if row["Status"] == "Pago" else C_AMBER
             col_card, col_del = st.columns([6, 1])
             with col_card:
                 st.markdown(
                     f"""<div class="entrega-card">
                         <div class="entrega-info">
                             <div class="entrega-loja">{row['Estabelecimento']}</div>
-                            <div class="entrega-meta">{row['Bairro']} · {row['Data']} · <span class="{badge_cls}">{badge_sym}</span></div>
+                            <div class="entrega-meta">{row['Bairro']} &middot; {row['Data']} &middot;
+                                <span class="{s_cls}">{s_txt}</span></div>
                         </div>
-                        <div class="entrega-valor">{fmt_brl(row['Valor(R$)'])}</div>
+                        <div class="entrega-valor" style="color:{v_cor};">{fmt_brl(row['Valor(R$)'])}</div>
                     </div>""",
                     unsafe_allow_html=True,
                 )
             with col_del:
                 st.markdown('<div class="btn-danger">', unsafe_allow_html=True)
-                if st.button("✕", key=f"del_entrega_{int(row['ID'])}", use_container_width=True):
+                if st.button("Excluir", key=f"del_entrega_{int(row['ID'])}", use_container_width=True):
                     database.deletar_entrega_por_id(int(row["ID"]), username_atual())
                     st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
@@ -528,7 +522,6 @@ with abas[2]:
         unsafe_allow_html=True,
     )
 
-    # Reutiliza os dados já carregados se disponíveis na mesma sessão
     entregas_raw2 = database.listar_entregas(username=username_atual())
 
     if not entregas_raw2:
@@ -542,13 +535,13 @@ with abas[2]:
         df_pend = df2[df2["Status"] == "Pendente"].copy()
 
         if df_pend.empty:
-            st.success("🎉 Tudo pago! Nenhuma pendência.")
+            st.success("Sem pendências. Tudo recebido.")
         else:
             st.markdown(
                 kpi_html(
-                    "Total Pendente",
+                    "Total em Aberto",
                     fmt_brl(df_pend["Valor(R$)"].sum()),
-                    f"{len(df_pend)} taxa(s) em aberto",
+                    f"{len(df_pend)} taxa(s) pendente(s)",
                     "amber",
                 ),
                 unsafe_allow_html=True,
@@ -560,38 +553,38 @@ with abas[2]:
                     f"""<div class="entrega-card">
                         <div class="entrega-info">
                             <div class="entrega-loja">{row['Estabelecimento']}</div>
-                            <div class="entrega-meta">{row['Bairro']} · {row['Data']}</div>
+                            <div class="entrega-meta">{row['Bairro']} &middot; {row['Data']}</div>
                         </div>
-                        <div class="entrega-valor" style="color:{C_AMBER}">{fmt_brl(row['Valor(R$)'])}</div>
+                        <div class="entrega-valor" style="color:{C_AMBER};">{fmt_brl(row['Valor(R$)'])}</div>
                     </div>""",
                     unsafe_allow_html=True,
                 )
                 st.markdown('<div class="btn-success">', unsafe_allow_html=True)
-                if st.button("✓ Marcar como Pago", key=f"pagar_{int(row['ID'])}", use_container_width=True):
+                if st.button("Confirmar recebimento", key=f"pagar_{int(row['ID'])}", use_container_width=True):
                     database.atualizar_status(int(row["ID"]), "Pago")
                     st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
-                st.markdown(f"<div style='height:8px'></div>", unsafe_allow_html=True)
+                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
 
 # ── ABA 3: ESTABELECIMENTOS ───────────────────────────────────────────────────
 with abas[3]:
     st.markdown(
         '<div class="sec-eyebrow">Lojas</div>'
-        '<div class="sec-title">Gerenciar Estabelecimentos</div>',
+        '<div class="sec-title">Estabelecimentos</div>',
         unsafe_allow_html=True,
     )
 
-    sub1, sub2 = st.tabs(["➕ Cadastro Individual", "📥 Importar em Massa"])
+    sub1, sub2 = st.tabs(["Cadastro individual", "Importar em massa"])
 
     with sub1:
-        novo_nome = st.text_input("Nome do Local", placeholder="Ex: Burguer Central", key="nome_loja_ind")
-        if st.button("Cadastrar Loja", use_container_width=True, key="btn_cad_loja"):
+        novo_nome = st.text_input("Nome do estabelecimento", placeholder="Ex: Burguer Central", key="nome_loja_ind")
+        if st.button("Cadastrar", use_container_width=True, key="btn_cad_loja"):
             nome_limpo = novo_nome.strip()
             if nome_limpo:
                 inserido = database.cadastrar_estabelecimento(nome_limpo)
                 if inserido:
-                    st.success(f"'{nome_limpo}' cadastrado!")
+                    st.success(f"'{nome_limpo}' cadastrado.")
                     st.rerun()
                 else:
                     st.warning(f"'{nome_limpo}' já existe na lista.")
@@ -601,16 +594,16 @@ with abas[3]:
     with sub2:
         st.markdown(
             f"<span style='font-size:0.82rem;color:{C_MUTED};'>"
-            "Cole os nomes das lojas — um por linha ou separados por vírgula.</span>",
+            "Cole os nomes — um por linha ou separados por vírgula.</span>",
             unsafe_allow_html=True,
         )
         texto_massa = st.text_area(
-            "Lista de Estabelecimentos",
-            placeholder="Loja Exemplo A\nLoja Exemplo B\nLoja C, Loja D",
+            "Lista de estabelecimentos",
+            placeholder="Loja A\nLoja B\nLoja C, Loja D",
             height=140,
             key="txt_massa",
         )
-        if st.button("🚀 Cadastrar Lista Completa", use_container_width=True, key="btn_massa"):
+        if st.button("Cadastrar lista", use_container_width=True, key="btn_massa"):
             if texto_massa.strip():
                 lojas = list({
                     parte.strip()
@@ -618,11 +611,11 @@ with abas[3]:
                     for parte in linha.split(",")
                     if parte.strip()
                 })
-                contagem = sum(database.cadastrar_estabelecimento(l) for l in lojas)
+                contagem  = sum(database.cadastrar_estabelecimento(l) for l in lojas)
                 ignorados = len(lojas) - contagem
-                msg = f"✓ {contagem} adicionadas!"
+                msg = f"{contagem} estabelecimento(s) adicionado(s)."
                 if ignorados:
-                    msg += f" ({ignorados} já existiam e foram ignoradas)"
+                    msg += f" {ignorados} já existiam e foram ignorados."
                 st.success(msg)
                 if contagem:
                     st.rerun()
@@ -631,8 +624,8 @@ with abas[3]:
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(
-        f'<div style="font-size:0.85rem;font-weight:600;color:{C_TEXT};'
-        f'margin-bottom:10px;">Lojas Cadastradas</div>',
+        f'<div style="font-size:0.85rem;font-weight:600;color:{C_TEXT};margin-bottom:10px;">'
+        f'Cadastrados</div>',
         unsafe_allow_html=True,
     )
 
@@ -644,12 +637,12 @@ with abas[3]:
             col_nome, col_del = st.columns([6, 1])
             col_nome.markdown(
                 f"<div style='padding:10px 0;border-bottom:1px solid {C_BORDER};"
-                f"font-size:0.88rem;'>🏢 {e_nome}</div>",
+                f"font-size:0.88rem;'>{e_nome}</div>",
                 unsafe_allow_html=True,
             )
             with col_del:
                 st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
-                if st.button("✕", key=f"del_estab_{e_id}", use_container_width=True):
+                if st.button("Remover", key=f"del_estab_{e_id}", use_container_width=True):
                     database.deletar_estabelecimento(id_=e_id)
                     st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
@@ -673,163 +666,145 @@ with abas[4]:
             columns=["ID", "Bairro", "Valor(R$)", "Status", "Estabelecimento", "Data", "Usuario"],
         )
         df4["Valor(R$)"] = pd.to_numeric(df4["Valor(R$)"], errors="coerce")
-
-        # ── Normalização robusta de datas ──────────────────────────────────────
-        # Tenta múltiplos formatos para lidar com qualquer variação de banco legado
-        def parse_data_robusta(serie: pd.Series) -> pd.Series:
-            # Formatos mais comuns em ordem de prioridade
-            for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
-                parsed = pd.to_datetime(serie, format=fmt, errors="coerce")
-                if parsed.notna().sum() > parsed.isna().sum():
-                    return parsed.dt.date
-            # Fallback: pandas tenta inferir
-            return pd.to_datetime(serie, infer_datetime_format=True, errors="coerce").dt.date
-
-        df4["Data_p"] = parse_data_robusta(df4["Data"])
+        df4["Data_p"]    = parse_data_robusta(df4["Data"])
         df4 = df4.dropna(subset=["Data_p"])
 
-        hoje       = date.today()
-        inicio_sem = hoje - timedelta(days=hoje.weekday())   # segunda-feira da semana atual
-        inicio_mes = hoje.replace(day=1)                      # primeiro dia do mês atual
+        # Datas calculadas no fuso de Fortaleza
+        hoje       = hoje_br()
+        inicio_sem = hoje - timedelta(days=hoje.weekday())
+        inicio_mes = hoje.replace(day=1)
 
-        # Filtros comparando objetos date com date — sem ambiguidade de tipo
         df_hoje = df4[df4["Data_p"] == hoje]
         df_sem  = df4[(df4["Data_p"] >= inicio_sem) & (df4["Data_p"] <= hoje)]
         df_mes  = df4[(df4["Data_p"] >= inicio_mes) & (df4["Data_p"] <= hoje)]
 
-        # KPIs topo — soma TODAS as entregas (pagas + pendentes = ganho bruto do período)
+        # KPIs de período — todas as entregas (bruto)
         st.markdown(
             kpi_grid(
-                kpi_html("Hoje",   fmt_brl(df_hoje["Valor(R$)"].sum()), f"{len(df_hoje)} entregas", "green"),
-                kpi_html("Semana", fmt_brl(df_sem["Valor(R$)"].sum()),  f"{len(df_sem)} entregas",  "accent"),
-                kpi_html("Mês",    fmt_brl(df_mes["Valor(R$)"].sum()),  f"{len(df_mes)} entregas",  "amber"),
+                kpi_html("Hoje",   fmt_brl(df_hoje["Valor(R$)"].sum()), f"{len(df_hoje)} entrega(s)", "green"),
+                kpi_html("Semana", fmt_brl(df_sem["Valor(R$)"].sum()),  f"{len(df_sem)} entrega(s)",  "accent"),
+                kpi_html("Mês",    fmt_brl(df_mes["Valor(R$)"].sum()),  f"{len(df_mes)} entrega(s)",  "amber"),
             ),
             unsafe_allow_html=True,
         )
 
-        # KPIs secundários — só pagas vs pendentes do mês
-        pagas_mes   = df_mes[df_mes["Status"] == "Pago"]["Valor(R$)"].sum()
-        pend_mes    = df_mes[df_mes["Status"] == "Pendente"]["Valor(R$)"].sum()
+        # KPIs do mês — recebido vs pendente
+        pagas_mes = df_mes[df_mes["Status"] == "Pago"]["Valor(R$)"].sum()
+        pend_mes  = df_mes[df_mes["Status"] == "Pendente"]["Valor(R$)"].sum()
         st.markdown(
             kpi_grid(
-                kpi_html("Recebido no Mês",  fmt_brl(pagas_mes), "apenas Pago", "green"),
-                kpi_html("Pendente no Mês",  fmt_brl(pend_mes),  "a receber",   "amber"),
+                kpi_html("Recebido no mês",  fmt_brl(pagas_mes), "status Pago",  "green"),
+                kpi_html("Pendente no mês",  fmt_brl(pend_mes),  "a receber",    "amber"),
             ),
             unsafe_allow_html=True,
         )
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # ── Resumo diário ──────────────────────────────────────────────────────
-        with st.expander("📅 Resumo por Dia", expanded=True):
-            # Seletor de intervalo
+        # ── Resumo por dia ────────────────────────────────────────────────────
+        with st.expander("Resumo por dia", expanded=True):
             col_d1, col_d2 = st.columns(2)
-            data_ini = col_d1.date_input(
-                "De", value=inicio_mes, max_value=hoje, key="resumo_de"
-            )
-            data_fim = col_d2.date_input(
-                "Até", value=hoje, min_value=data_ini, max_value=hoje, key="resumo_ate"
-            )
+            data_ini = col_d1.date_input("De", value=inicio_mes, max_value=hoje, key="resumo_de")
+            data_fim = col_d2.date_input("Até", value=hoje, min_value=data_ini, max_value=hoje, key="resumo_ate")
 
-            df_intervalo = df4[
-                (df4["Data_p"] >= data_ini) & (df4["Data_p"] <= data_fim)
-            ].copy()
+            df_int = df4[(df4["Data_p"] >= data_ini) & (df4["Data_p"] <= data_fim)].copy()
 
-            if df_intervalo.empty:
+            if df_int.empty:
                 st.info("Nenhuma entrega no período selecionado.")
             else:
-                # Agrupamento por dia
+                # Agrupamento por dia com separação pago/pendente
                 resumo = (
-                    df_intervalo.groupby("Data_p")
-                    .agg(
-                        Entregas=("Valor(R$)", "count"),
-                        Total=("Valor(R$)", "sum"),
-                        Recebido=("Valor(R$)", lambda x: x[df_intervalo.loc[x.index, "Status"] == "Pago"].sum()),
-                        Pendente=("Valor(R$)", lambda x: x[df_intervalo.loc[x.index, "Status"] == "Pendente"].sum()),
-                    )
+                    df_int.groupby("Data_p")
+                    .apply(lambda g: pd.Series({
+                        "Entregas": len(g),
+                        "Total":    g["Valor(R$)"].sum(),
+                        "Recebido": g.loc[g["Status"] == "Pago",     "Valor(R$)"].sum(),
+                        "Pendente": g.loc[g["Status"] == "Pendente", "Valor(R$)"].sum(),
+                    }))
                     .reset_index()
                     .sort_values("Data_p", ascending=False)
                 )
 
-                # Totalizador do período
-                total_periodo  = resumo["Total"].sum()
-                recebido_per   = resumo["Recebido"].sum()
-                pend_per       = resumo["Pendente"].sum()
-                entregas_per   = resumo["Entregas"].sum()
+                total_per    = resumo["Total"].sum()
+                recebido_per = resumo["Recebido"].sum()
+                pend_per     = resumo["Pendente"].sum()
+                qtd_per      = int(resumo["Entregas"].sum())
 
                 st.markdown(
                     kpi_grid(
-                        kpi_html("Total do Período",    fmt_brl(total_periodo), f"{int(entregas_per)} entregas"),
-                        kpi_html("Recebido no Período", fmt_brl(recebido_per),  "status Pago",     "green"),
-                        kpi_html("Pendente no Período", fmt_brl(pend_per),      "a receber",       "amber"),
+                        kpi_html("Total do período",    fmt_brl(total_per),    f"{qtd_per} entregas"),
+                        kpi_html("Recebido no período", fmt_brl(recebido_per), "pagas",     "green"),
+                        kpi_html("Pendente no período", fmt_brl(pend_per),     "a receber", "amber"),
                     ),
                     unsafe_allow_html=True,
                 )
 
                 st.markdown("<br>", unsafe_allow_html=True)
 
-                # Cards por dia
-                DIAS_PT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+                DIAS_PT  = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
                 MESES_PT = ["", "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
                             "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
 
                 for _, linha in resumo.iterrows():
-                    d = linha["Data_p"]
-                    dia_semana = DIAS_PT[d.weekday()]
-                    data_fmt   = f"{dia_semana}, {d.day:02d} {MESES_PT[d.month]}"
+                    d          = linha["Data_p"]
+                    dia_sem    = DIAS_PT[d.weekday()]
+                    data_fmt   = f"{dia_sem}, {d.day:02d} {MESES_PT[d.month]}"
                     eh_hoje    = (d == hoje)
-                    borda_cor  = C_ACCENT if eh_hoje else C_BORDER
-                    label_hoje = f" <span style='color:{C_ACCENT};font-size:0.65rem;font-weight:700;'>HOJE</span>" if eh_hoje else ""
-
-                    pct_recebido = (linha["Recebido"] / linha["Total"] * 100) if linha["Total"] > 0 else 0
+                    borda      = C_ACCENT if eh_hoje else C_BORDER
+                    tag_hoje   = (f" <span style='background:rgba(47,129,247,.15);color:{C_ACCENT};"
+                                  f"font-size:0.6rem;font-weight:700;padding:1px 6px;border-radius:3px;"
+                                  f"letter-spacing:.05em;'>HOJE</span>") if eh_hoje else ""
+                    pct        = (linha["Recebido"] / linha["Total"] * 100) if linha["Total"] > 0 else 0
 
                     st.markdown(
-                        f"""<div style='background:{C_SURFACE};border:1px solid {borda_cor};
-                            border-radius:10px;padding:12px 14px;margin-bottom:8px;'>
-                            <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;'>
+                        f"""<div style='background:{C_SURFACE};border:1px solid {borda};
+                            border-radius:10px;padding:14px 16px;margin-bottom:8px;'>
+                            <div style='display:flex;justify-content:space-between;
+                                align-items:center;margin-bottom:10px;'>
                                 <span style='font-weight:700;font-size:0.88rem;color:{C_TEXT};'>
-                                    {data_fmt}{label_hoje}
+                                    {data_fmt}{tag_hoje}
                                 </span>
                                 <span style='font-family:JetBrains Mono,monospace;font-size:0.95rem;
                                     font-weight:700;color:{C_TEXT};'>
                                     {fmt_brl(linha["Total"])}
                                 </span>
                             </div>
-                            <div style='display:flex;gap:16px;font-size:0.72rem;color:{C_MUTED};margin-bottom:8px;'>
-                                <span>📦 {int(linha['Entregas'])} entregas</span>
-                                <span style='color:{C_GREEN};'>✓ {fmt_brl(linha["Recebido"])}</span>
-                                <span style='color:{C_AMBER};'>⏳ {fmt_brl(linha["Pendente"])}</span>
+                            <div style='display:flex;gap:20px;font-size:0.72rem;
+                                color:{C_MUTED};margin-bottom:10px;'>
+                                <span>{int(linha['Entregas'])} entrega(s)</span>
+                                <span style='color:{C_GREEN};'>Recebido: {fmt_brl(linha["Recebido"])}</span>
+                                <span style='color:{C_AMBER};'>Pendente: {fmt_brl(linha["Pendente"])}</span>
                             </div>
-                            <div style='background:{C_BORDER};border-radius:4px;height:4px;overflow:hidden;'>
-                                <div style='background:{C_GREEN};height:4px;width:{pct_recebido:.1f}%;
-                                    border-radius:4px;transition:width 0.3s;'></div>
+                            <div style='background:{C_BORDER};border-radius:4px;height:3px;'>
+                                <div style='background:{C_GREEN};height:3px;width:{pct:.1f}%;
+                                    border-radius:4px;'></div>
                             </div>
-                            <div style='font-size:0.62rem;color:{C_MUTED};margin-top:4px;'>
-                                {pct_recebido:.0f}% recebido
+                            <div style='font-size:0.6rem;color:{C_MUTED};margin-top:4px;'>
+                                {pct:.0f}% recebido
                             </div>
                         </div>""",
                         unsafe_allow_html=True,
                     )
 
-        # ── Gráfico por estabelecimento ────────────────────────────────────────
-        with st.expander("📊 Faturamento por Estabelecimento", expanded=False):
+        # ── Por estabelecimento ───────────────────────────────────────────────
+        with st.expander("Faturamento por estabelecimento", expanded=False):
             periodo = st.selectbox(
-                "Período:",
-                ["Tudo", "Hoje", "Esta Semana", "Este Mês"],
+                "Período",
+                ["Histórico completo", "Hoje", "Esta semana", "Este mês"],
                 key="filtro_periodo_painel",
             )
-            mapa_periodo = {"Hoje": df_hoje, "Esta Semana": df_sem, "Este Mês": df_mes, "Tudo": df4}
-            df_fil = mapa_periodo[periodo]
+            mapa = {
+                "Hoje": df_hoje, "Esta semana": df_sem,
+                "Este mês": df_mes, "Histórico completo": df4,
+            }
+            df_fil = mapa[periodo]
 
             if not df_fil.empty:
                 df_agr = df_fil.groupby("Estabelecimento")["Valor(R$)"].sum().reset_index()
                 fig_pie = px.pie(
-                    df_agr,
-                    names="Estabelecimento",
-                    values="Valor(R$)",
-                    template="plotly_dark",
-                    hole=0.4,
-                    title=f"Por Loja — {periodo}",
+                    df_agr, names="Estabelecimento", values="Valor(R$)",
+                    template="plotly_dark", hole=0.4,
+                    title=f"Por estabelecimento — {periodo}",
                 )
                 fig_pie.update_layout(LAYOUT)
                 fig_pie.update_traces(textinfo="percent+value", textposition="inside")
@@ -837,20 +812,15 @@ with abas[4]:
             else:
                 st.warning(f"Sem registros para: {periodo}.")
 
-        # ── Gráfico por bairro ─────────────────────────────────────────────────
-        with st.expander("📈 Faturamento por Bairro (histórico)", expanded=False):
+        # ── Por bairro ────────────────────────────────────────────────────────
+        with st.expander("Faturamento por bairro", expanded=False):
             df_bairro = (
-                df4.groupby("Bairro")["Valor(R$)"]
-                .sum()
-                .reset_index()
-                .sort_values("Valor(R$)", ascending=False)
+                df4.groupby("Bairro")["Valor(R$)"].sum()
+                .reset_index().sort_values("Valor(R$)", ascending=False)
             )
             fig_bar = px.bar(
-                df_bairro,
-                x="Bairro",
-                y="Valor(R$)",
-                template="plotly_dark",
-                text_auto=".2f",
+                df_bairro, x="Bairro", y="Valor(R$)",
+                template="plotly_dark", text_auto=".2f",
             )
             layout_b = {**LAYOUT, "xaxis": {**LAYOUT["xaxis"], "tickangle": -45}}
             fig_bar.update_layout(layout_b)
@@ -858,28 +828,28 @@ with abas[4]:
             st.plotly_chart(fig_bar, use_container_width=True, config={"displayModeBar": False})
 
 
-# ── ABA 5: STAFF (somente admin) ─────────────────────────────────────────────
+# ── ABA 5: EQUIPE (somente admin) ────────────────────────────────────────────
 if is_admin():
     with abas[5]:
         st.markdown(
-            '<div class="sec-eyebrow">Configurações</div>'
-            '<div class="sec-title">Membros do Sistema</div>',
+            '<div class="sec-eyebrow">Administração</div>'
+            '<div class="sec-title">Equipe</div>',
             unsafe_allow_html=True,
         )
 
-        novo_nome_u = st.text_input("Nome Completo", key="txt_nome_user")
+        novo_nome_u = st.text_input("Nome completo", key="txt_nome_user")
         novo_user   = st.text_input("Login (username)", key="txt_login")
         nova_senha  = st.text_input("Senha", type="password", key="txt_senha")
         perfil_sel  = st.selectbox("Perfil", ["entregador", "admin"], key="sel_perfil")
 
-        if st.button("Salvar Membro", use_container_width=True, key="btn_cad_user"):
+        if st.button("Salvar membro", use_container_width=True, key="btn_cad_user"):
             if novo_nome_u.strip() and novo_user.strip() and nova_senha.strip():
                 try:
                     database.cadastrar_usuario(
                         username=novo_user, nome=novo_nome_u,
                         senha=nova_senha, perfil=perfil_sel,
                     )
-                    st.success(f"Membro @{novo_user.strip()} cadastrado!")
+                    st.success(f"@{novo_user.strip()} cadastrado.")
                     st.rerun()
                 except Exception:
                     st.error("Erro: esse username já existe.")
@@ -900,7 +870,7 @@ if is_admin():
             with col_d:
                 if u["username"] != username_atual():
                     st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
-                    if st.button("✕", key=f"del_user_{u['id']}", use_container_width=True):
+                    if st.button("Remover", key=f"del_user_{u['id']}", use_container_width=True):
                         database.deletar_usuario(u["id"])
                         st.rerun()
                     st.markdown("</div>", unsafe_allow_html=True)
