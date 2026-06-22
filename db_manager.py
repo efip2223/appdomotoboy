@@ -87,11 +87,28 @@ def autenticar_usuario(username: str, senha: str):
     senha_hash = gerar_hash_senha(senha)
     u_clean = username.strip().lower()
 
+    # 1ª tentativa: senha já está em hash (fluxo normal)
     cursor.execute(
         "SELECT * FROM usuarios WHERE LOWER(TRIM(username)) = %s AND senha = %s;",
         (u_clean, senha_hash),
     )
     usuario = cursor.fetchone()
+
+    if not usuario:
+        # 2ª tentativa: senha ainda em texto puro (banco legado)
+        # Se achar, migra automaticamente para hash e loga normalmente
+        cursor.execute(
+            "SELECT * FROM usuarios WHERE LOWER(TRIM(username)) = %s AND senha = %s;",
+            (u_clean, senha),
+        )
+        usuario = cursor.fetchone()
+        if usuario:
+            cursor.execute(
+                "UPDATE usuarios SET senha = %s WHERE LOWER(TRIM(username)) = %s;",
+                (senha_hash, u_clean),
+            )
+            conn.commit()
+
     cursor.close()
     conn.close()
     return usuario
